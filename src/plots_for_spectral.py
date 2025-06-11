@@ -95,3 +95,227 @@ def tsplot(ax, data,**kw):
     ax.fill_between(x,cis[0],cis[1],alpha=0.2, **kw)
     ax.plot(x,est,**kw)
     ax.margins(x=0)
+
+def make_tsplot(populationdata,
+           sortresponse,
+           framerate,
+           pre_window_size,
+           window_size,
+           frames_for_infusion,
+           cmax,
+           trial_types,
+           **kwargs):
+
+    f, axs = plt.subplots(nrows=2, figsize=(3,6), sharex='all', sharey='row')
+    cbar_ax = f.add_axes([0.86, .3, .01, .4])
+    cbar_ax.tick_params(width=0.5)
+
+    for t in range(len(trial_types)):
+        axs[0].set_title(trial_types[t])
+        ax = axs[0]
+        sns.heatmap(populationdata[sortresponse, t*window_size: (t+1)*window_size],
+                    ax=ax,
+                    cmap=plt.get_cmap('coolwarm'),
+                    vmin=-cmax,
+                    vmax=cmax,
+                    cbar=(t==0),
+                    cbar_ax=cbar_ax if (t==0) else None,
+                    cbar_kws={'label': 'Normalized fluorescence'})
+        ax.grid(False)
+        ax.tick_params(width=0.5)   
+        ax.set_xticks([0, pre_window_size, pre_window_size + frames_for_infusion, window_size]) 
+        ax.set_xticklabels([str(int((a-pre_window_size+0.0)/framerate))
+                                        for a in [0, pre_window_size,
+                                                pre_window_size + frames_for_infusion, window_size]])
+        ax.set_yticks([])
+        ax.axvline(pre_window_size, linestyle='--', color='k', linewidth=0.5)    
+        ax.axvline(pre_window_size + frames_for_infusion, linestyle='--', color='k', linewidth=0.5)    
+        ax.set_xlabel('Time from inf (s)')
+        
+            
+        ax = axs[1]
+        tsplot(ax, populationdata[sortresponse, t*window_size:(t+1)*window_size],
+                )
+        ax.axvline(pre_window_size, linestyle='--', color='k', linewidth=0.5)    
+        ax.axvline(pre_window_size + frames_for_infusion, linestyle='--', color='k', linewidth=0.5)    
+        ax.set_xlabel('Time from inf (s)')
+        ax.set_xticks([0, pre_window_size, pre_window_size + frames_for_infusion, window_size]) 
+        ax.set_xticklabels([str(int((a-pre_window_size+0.0)/framerate))
+                                        for a in [0, pre_window_size,
+                                                pre_window_size + frames_for_infusion, window_size]])
+        
+    axs[0].set_ylabel('Trials')
+    axs[1].set_ylabel('Mean norm. fluor.')
+
+    f.tight_layout()
+    f.subplots_adjust(right=0.82)
+
+    return f, axs
+
+def plot_scree(x,
+               pca,
+               num_retained_pcs):
+        
+    f, ax = plt.subplots(figsize=(2,2))
+    ax.plot(np.arange(pca.explained_variance_ratio_.shape[0]).astype(int)+1, x, 'k')
+    ax.set_ylabel('Percentage of\nvariance explained')
+    ax.set_xlabel('PC number')
+    ax.axvline(num_retained_pcs, linestyle='--', color='k', linewidth=0.5)
+    ax.set_title('Scree plot')
+    # ax.set_xlim([0,50])
+    #[i.set_linewidth(0.5) for i in ax.spines.itervalues()]
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    f.subplots_adjust(left=0.3)
+    f.subplots_adjust(right=0.98)
+    f.subplots_adjust(bottom=0.25)
+    f.subplots_adjust(top=0.9)
+
+    return f, ax
+
+def plot_pca_vectors(pca_vectors,
+                     num_retained_pcs,
+                     framerate,
+                     pre_window_size,
+                     window_size,
+                     frames_for_infusion,):
+
+    numcols = 3.0
+    f, axs = plt.subplots(int(np.ceil(num_retained_pcs/numcols)), int(numcols), sharey='all',
+                            figsize=(2*numcols, 2*int(np.ceil(num_retained_pcs/numcols))))
+    for pc in range(num_retained_pcs):
+        ax = axs.flat[pc]
+
+        ax.plot(pca_vectors[pc, :], color="k",
+                label='PC %d: %s'%(pc+1, "trial"))
+        ax.axvline(pre_window_size, linestyle='--', color='k', linewidth=1)
+        # ax.annotate(s='PC %d'%(pc+1), xy=(0.45, 0.06), xytext=(0.45, 0.06), xycoords='axes fraction',
+        #            textcoords='axes fraction', multialignment='center', size='large')
+        if pc >= num_retained_pcs-numcols:
+            ax.set_xticks([0, pre_window_size,
+                        pre_window_size + frames_for_infusion, window_size])
+            ax.set_xticklabels([str(int((a-pre_window_size+0.0)/framerate))
+                                for a in [0, pre_window_size,
+                                        pre_window_size + frames_for_infusion, window_size]])
+        else:
+            ax.set_xticks([])
+            ax.xaxis.set_ticks_position('none')
+        if pc%numcols:
+            ax.yaxis.set_ticks_position('none')
+        # [i.set_linewidth(0.5) for i in ax.spines.itervalues()]
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+
+
+    f.text(0.5, 0.05, 'Time from inf (s)', horizontalalignment='center', rotation='horizontal')
+    f.text(0.02, 0.6, 'PCA weights', verticalalignment='center', rotation='vertical')
+    f.tight_layout()
+    for ax in axs.flat[num_retained_pcs:]:
+        ax.set_visible(False)
+
+    f.subplots_adjust(wspace=0.08, hspace=0.08)
+    f.subplots_adjust(bottom=0.13)
+
+    return f, axs
+
+def make_silhouette_plot(X,
+                         cluster_labels,
+                         colors_for_cluster=["red", "green", "blue", "orange", "purple", "brown"]
+                         ):
+    
+    n_clusters = len(set(cluster_labels))
+    
+    fig, ax = plt.subplots(1, 1)
+    fig.set_size_inches(4, 4)
+
+    # The 1st subplot is the silhouette plot
+    # The silhouette coefficient can range from -1, 1 but in this example all
+    # lie within [-0.1, 1]
+    ax.set_xlim([-0.4, 1])
+    # The (n_clusters+1)*10 is for inserting blank space between silhouette
+    # plots of individual clusters, to demarcate them clearly.
+    ax.set_ylim([0, len(X) + (n_clusters + 1) * 10])
+    silhouette_avg = silhouette_score(X, cluster_labels, metric='cosine')
+
+    # Compute the silhouette scores for each sample
+    sample_silhouette_values = silhouette_samples(X, cluster_labels, metric='cosine')
+
+    y_lower = 10
+    for i in range(n_clusters):
+        # Aggregate the silhouette scores for samples belonging to
+        # cluster i, and sort them
+        ith_cluster_silhouette_values = \
+            sample_silhouette_values[cluster_labels == i]
+
+        ith_cluster_silhouette_values.sort()
+
+        size_cluster_i = ith_cluster_silhouette_values.shape[0]
+        y_upper = y_lower + size_cluster_i
+
+        color = colors_for_cluster[i]
+        ax.fill_betweenx(np.arange(y_lower, y_upper),
+                          0, ith_cluster_silhouette_values,
+                          facecolor=color, edgecolor=color, alpha=0.9)
+
+        # Label the silhouette plots with their cluster numbers at the middle
+        ax.text(-0.05, y_lower + 0.5 * size_cluster_i, str(i+1))
+
+        # Compute the new y_lower for next plot
+        y_lower = y_upper + 10  # 10 for the 0 samples
+
+    ax.set_title("The silhouette plot for the various clusters.")
+    ax.set_xlabel("The silhouette coefficient values")
+    ax.set_ylabel("Cluster label")
+
+    # The vertical line for average silhouette score of all the values
+    ax.axvline(x=silhouette_avg, color="red", linestyle="--")
+
+    ax.set_yticks([])  # Clear the yaxis labels / ticks
+    ax.set_xticks([-0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8, 1])
+
+def show_clusters(populationdata,
+                  newlabels,
+                  uniquelabels,
+                  pre_window_size,
+                  frames_for_infusion,
+                  window_size,
+                  framerate,
+                  cmax,
+                  colors_for_cluster=["red", "green", "blue", "orange", "purple", "brown", "pink", "gray", "cyan"]
+                  ):
+
+    f, ax = plt.subplots(ncols=2, nrows=2, figsize=(5,5))
+    
+    # make heatmaps first and then line plots
+    for c, cluster in enumerate(uniquelabels):
+        k=0
+        temp = populationdata[np.where(newlabels==cluster)[0], k*window_size:(k+1)*window_size]
+        sortresponse = np.argsort(np.mean(temp[:,pre_window_size:pre_window_size + frames_for_infusion], axis=1))[::-1]
+        
+        axis = ax[0, c]
+        axis.set_title('Cluster %d\n(n=%d)'%(cluster+1, temp.shape[0]))
+        sns.heatmap(temp[sortresponse],
+                    ax=axis,
+                    cmap=plt.get_cmap('coolwarm'),
+                    vmin=-cmax,
+                    vmax=cmax,
+                    cbar=(c==1),
+                    cbar_kws={'label': 'Normalized fluorescence'})
+        
+        axis = ax[1, c]
+        axis.plot(np.arange(0, window_size)/framerate - pre_window_size/framerate,
+                      np.mean(temp, axis=0),
+                      color=colors_for_cluster[c],)
+        axis.fill_between(np.arange(0, window_size)/framerate - pre_window_size/framerate,
+                          np.mean(temp, axis=0) - np.std(temp, axis=0),
+                          np.mean(temp, axis=0) + np.std(temp, axis=0),
+                          color=colors_for_cluster[c], alpha=0.2)
+        
+        axis.axvline(-pre_window_size/framerate, linestyle='--', color='k', linewidth=0.5)
+        axis.axvline(-pre_window_size/framerate + frames_for_infusion/framerate, linestyle='--', color='k', linewidth=0.5)
+        
+        sns.despine(ax=axis, left=True, bottom=True)
+    
+    ax[1,1].sharey(ax[1,0])
+     
