@@ -95,18 +95,22 @@ def save_video_snippet(input_path, output_path, start_frame, end_frame,
     # Detect input video format from extension
     input_ext = input_path.suffix.lower()
     
+    # Check if input video is filtered
+    is_filtered = "filtered" in input_path.name.lower()
+    filtered_suffix = "_filtered" if is_filtered else ""
+    
     # Create output directory if using stub
     if stub:
         output_folder = output_path / stub
         output_folder.mkdir(parents=True, exist_ok=True)
         if trial_num is not None:
-            output_file = output_folder / f"{stub}_trial_{trial_num:02d}_{start_frame}{input_ext}"
+            output_file = output_folder / f"{stub}_trial_{trial_num:02d}_{start_frame}{filtered_suffix}{input_ext}"
         else:
-            output_file = output_folder / f"{stub}_{start_frame}{input_ext}"
+            output_file = output_folder / f"{stub}_{start_frame}{filtered_suffix}{input_ext}"
     else:
         output_folder = output_path
         output_folder.mkdir(parents=True, exist_ok=True)
-        output_file = output_folder / f"snippet_{start_frame}_{end_frame}{input_ext}"
+        output_file = output_folder / f"snippet_{start_frame}_{end_frame}{filtered_suffix}{input_ext}"
     
     output_path_str = str(output_file)
     print(f"Saving video to: {output_path_str}")
