@@ -174,14 +174,14 @@ def extract_videos(stub, input_folder, output_folder, ttls_csv, pre_seconds=5, p
     stub : str
         Recording identifier
     input_folder : Path
-        Root folder containing video files
+        Path to a video file or root folder containing video files
     output_folder : Path
         Output folder for video snippets
     ttls_csv : Path
         Path to CSV file containing TTL data
-    pre_seconds : float, default=10
+    pre_seconds : float, default=5
         Seconds of video to extract before each TTL event
-    post_seconds : float, default=10
+    post_seconds : float, default=15
         Seconds of video to extract after each TTL event
     """
     ttls = load_ttls_from_csv(ttls_csv, stub)
@@ -190,13 +190,21 @@ def extract_videos(stub, input_folder, output_folder, ttls_csv, pre_seconds=5, p
         print(f"No TTLs found for stub {stub}")
         return
     
-    video_path = input_folder / get_videopath(stub)
+    # Check if input_folder is actually a video file
+    input_path = Path(input_folder)
+    video_extensions = ('.avi', '.mp4', '.mov', '.mkv', '.flv', '.wmv', '.webm', '.m4v')
     
-    if not video_path.exists():
-        video_path = input_folder / stub / get_videopath(stub)
-    
-    if not video_path.exists():
-        raise FileNotFoundError(f"Video file not found for stub {stub} at expected locations: {video_path}")
+    if input_path.is_file() and input_path.suffix.lower() in video_extensions:
+        video_path = input_path
+    else:
+        # Treat as a folder and construct the video path from stub
+        video_path = input_path / get_videopath(stub)
+        
+        if not video_path.exists():
+            video_path = input_path / stub / get_videopath(stub)
+        
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video file not found for stub {stub} at expected locations: {video_path}")
     
     # Get video properties to determine frame rate
     cap = cv2.VideoCapture(str(video_path))
@@ -238,7 +246,7 @@ Example:
     parser.add_argument("--ttls-csv", type=Path, required=True,
                        help="Path to CSV file containing TTL data")
     parser.add_argument("-i", "--input_folder", type=Path, required=True, dest="input_folder",
-                       help="Root folder containing video files")
+                       help="Path to a video file or root folder containing video files")
     parser.add_argument("-o", "--output_folder", type=Path, required=True, dest="output_folder",
                        help="Output folder for video snippets")
     parser.add_argument("--pre", type=float, default=10,
