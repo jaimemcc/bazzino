@@ -249,10 +249,10 @@ Example:
                        help="Path to a video file or root folder containing video files")
     parser.add_argument("-o", "--output_folder", type=Path, required=True, dest="output_folder",
                        help="Output folder for video snippets")
-    parser.add_argument("--pre", type=float, default=10,
-                       help="Seconds of video to extract before TTL event (default: 10)")
-    parser.add_argument("--post", type=float, default=10,
-                       help="Seconds of video to extract after TTL event (default: 10)")
+    parser.add_argument("--pre", type=float, default=5,
+                       help="Seconds of video to extract before TTL event (default: 5)")
+    parser.add_argument("--post", type=float, default=15,
+                       help="Seconds of video to extract after TTL event (default: 15)")
     args = parser.parse_args()
     
     try:
