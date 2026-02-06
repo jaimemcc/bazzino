@@ -65,7 +65,7 @@ def get_videopath(stub):
 
 
 def save_video_snippet(input_path, output_path, start_frame, end_frame, 
-                       stub=None, trial_num=None, text=None, text_start_frame=100):
+                       stub=None, trial_num=None, text=None, text_start_frame=50):
     """
     Extract a portion of an AVI file and save it.
     
@@ -165,7 +165,7 @@ def save_video_snippet(input_path, output_path, start_frame, end_frame,
     print(f"Video snippet saved: {num_frames} frames")
 
 
-def extract_videos(stub, input_folder, output_folder, ttls_csv, pre_seconds=10, post_seconds=10):
+def extract_videos(stub, input_folder, output_folder, ttls_csv, pre_seconds=5, post_seconds=15):
     """
     Extract video snippets for all TTL events in a recording.
     
