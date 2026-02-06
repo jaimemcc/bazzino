@@ -67,12 +67,12 @@ def get_videopath(stub):
 def save_video_snippet(input_path, output_path, start_frame, end_frame, 
                        stub=None, trial_num=None, text=None, text_start_frame=50):
     """
-    Extract a portion of an AVI file and save it.
+    Extract a portion of a video file and save it.
     
     Parameters:
     -----------
     input_path : Path or str
-        Path to input AVI file
+        Path to input video file
     output_path : Path or str
         Root output directory where organized output will be saved
     start_frame : int
@@ -85,31 +85,34 @@ def save_video_snippet(input_path, output_path, start_frame, end_frame,
         Trial number to include in output filename
     text : str, optional
         Text to overlay on the video
-    text_start_frame : int, default=100
+    text_start_frame : int, default=50
         Frame number (relative to start_frame) to start displaying text
     """
-    # Convert Path objects to strings
-    input_path = str(input_path)
+    # Convert Path objects
+    input_path = Path(input_path)
     output_path = Path(output_path)
+    
+    # Detect input video format from extension
+    input_ext = input_path.suffix.lower()
     
     # Create output directory if using stub
     if stub:
         output_folder = output_path / stub
         output_folder.mkdir(parents=True, exist_ok=True)
         if trial_num is not None:
-            output_file = output_folder / f"{stub}_trial_{trial_num:02d}_{start_frame}.avi"
+            output_file = output_folder / f"{stub}_trial_{trial_num:02d}_{start_frame}{input_ext}"
         else:
-            output_file = output_folder / f"{stub}_{start_frame}.avi"
+            output_file = output_folder / f"{stub}_{start_frame}{input_ext}"
     else:
         output_folder = output_path
         output_folder.mkdir(parents=True, exist_ok=True)
-        output_file = output_folder / f"snippet_{start_frame}_{end_frame}.avi"
+        output_file = output_folder / f"snippet_{start_frame}_{end_frame}{input_ext}"
     
     output_path_str = str(output_file)
     print(f"Saving video to: {output_path_str}")
 
     # Open the input video
-    cap = cv2.VideoCapture(input_path)
+    cap = cv2.VideoCapture(str(input_path))
     
     if not cap.isOpened():
         print(f"Error: Could not open input video: {input_path}")
@@ -122,20 +125,28 @@ def save_video_snippet(input_path, output_path, start_frame, end_frame,
     
     print(f"Input video properties: {width}x{height} @ {fps} fps")
     
-    # Define codec and create VideoWriter
-    # Try XVID codec (more compatible than MJPEG for AVI)
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(output_path_str, fourcc, fps, (width, height))
+    # Select appropriate codec based on output format
+    out = None
+    if input_ext == '.mp4':
+        # Try H.264 codec for MP4
+        codec_options = ['mp4v', 'avc1', 'H264']
+    else:
+        # AVI format codecs
+        codec_options = ['XVID', 'MJPG']
     
-    if not out.isOpened():
-        print(f"Warning: Could not create VideoWriter with XVID. Trying MJPEG...")
-        # Fallback to MJPEG
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    for codec in codec_options:
+        fourcc = cv2.VideoWriter_fourcc(*codec)
         out = cv2.VideoWriter(output_path_str, fourcc, fps, (width, height))
-        if not out.isOpened():
-            print("Error: Could not create VideoWriter with either XVID or MJPEG codec")
-            cap.release()
-            return
+        if out.isOpened():
+            print(f"Using codec: {codec}")
+            break
+        else:
+            print(f"Warning: Could not create VideoWriter with {codec}. Trying next codec...")
+    
+    if out is None or not out.isOpened():
+        print(f"Error: Could not create VideoWriter with any available codec")
+        cap.release()
+        return
     
     # Set starting frame
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
