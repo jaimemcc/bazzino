@@ -6,10 +6,13 @@ import tdt
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import savgol_filter
 
-def get_ttls(stub, datafolder, tankfolder):
+import trompy as tp
+
+def get_ttls(stub, datafolder, tankfolder=None):
 
     datafolder = Path(datafolder)
-    tankfolder = Path(tankfolder)
+    if tankfolder is not None:
+        tankfolder = Path(tankfolder)
 
     # Get the TTLs
     if (datafolder / "ttls.csv").exists():
@@ -30,6 +33,8 @@ def read_DLC_csv(stub, dlcfolder):
     pattern_str = f"PB_NAapp-{date}_{stub}*.csv"
     
     matching_files = list(dlcfolder.glob(pattern_str))
+    
+    print(dlcfolder)
 
     filename = None
     if not matching_files:
@@ -127,34 +132,6 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
         .drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
     )
     
-def calc_stillness(df):
-        
-
-    
-        return (
-        df
-        .assign(
-            rightear_dx = lambda x_df: x_df.rightear_x.diff(),
-            rightear_dy = lambda x_df: x_df.rightear_y.diff(),
-            rightear_distance = lambda x_df: np.sqrt(x_df.rightear_dx**2 + x_df.rightear_dy**2),
-            
-            leftear_dx = lambda x_df: x_df.leftear_x.diff(),
-            leftear_dy = lambda x_df: x_df.leftear_y.diff(),
-            leftear_distance = lambda x_df: np.sqrt(x_df.leftear_dx**2 + x_df.leftear_dy**2),
-            
-            nose_dx = lambda x_df: x_df.nose_x.diff(),
-            nose_dy = lambda x_df: x_df.nose_y.diff(),
-            nose_distance = lambda x_df: np.sqrt(x_df.nose_dx**2 + x_df.nose_dy**2),
-            
-            stillness_abs = lambda x_df: x_df.rightear_distance + x_df.leftear_distance + x_df.nose_distance
-        )
-        .assign(
-            stillness_z = lambda x_df: (x_df.stillness_abs - x_df.stillness_abs.mean()) / x_df.stillness_abs.std()
-        )
-                                                
-        # .drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
-        )
-
 def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
                           include_bodyparts=None, exclude_bodyparts=None):
     """
@@ -300,3 +277,40 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
         normalized = pd.Series(0.0, index=df.index)
     
     return normalized
+
+def get_behav_snips(behav_vector,
+                    solenoid_ts,
+                    zscore_to_baseline=False,
+                    zscore_to_entire_snips=False
+                    ):
+
+    snips = []
+    for i in range(len(solenoid_ts)-1):
+        start = int(solenoid_ts[i] * 10) - 50
+        end = int(solenoid_ts[i] * 10) + 150
+        snips.append(behav_vector[start:end])
+        
+    snips = np.array(snips)
+    
+    if zscore_to_baseline:
+        snips = tp.zscore(snips, baseline_points=50)
+    elif zscore_to_entire_snips:
+        snips = (snips - np.mean(behav_vector[1000:-1000])) / np.std(behav_vector[1000:-1000])
+    else:
+        pass
+    
+    return snips
+
+
+
+def smooth_array(arr, window_size=5):
+    """
+    Smooth a 2D array along one dimension using a moving average.
+    
+    :param arr: 2D NumPy array
+    :param window_size: Size of the smoothing window
+    :return: Smoothed 2D array
+    """
+    kernel = np.ones(window_size) / window_size
+    smoothed = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode='same'), axis=1, arr=arr)
+    return smoothed
