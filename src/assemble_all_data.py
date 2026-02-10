@@ -1,0 +1,822 @@
+"""
+Assemble all data for Bazzino & Roitman sodium appetite project.
+
+This script runs the full data pipeline:
+  1. Assemble behavioural (DLC) data — movement metric snips + x_array
+  2. Assemble photometry data — photometry snips + x_array
+  3. Equalize photometry and DLC data so they match in length
+  4. Spectral clustering of photometry data (labels 0/1 added to x_array)
+  5. Compute cluster distances (clusterness, euclidean diff)
+  6. Sigmoidal transition fitting (deplete + 45NaCl only)
+  7. Combine behaviour and photometry x_arrays, realign trials
+
+Outputs a single pickle: data/assembled_data.pickle
+containing: x_array, snips_photo, snips_movement, fits_df, z_dep45
+
+Usage:
+    python src/assemble_all_data.py
+
+Configurable parameters are collected at the top of the script in PARAMS dict.
+"""
+
+from pathlib import Path
+import sys
+import os
+import warnings
+
+os.environ["OMP_NUM_THREADS"] = "2"  # Avoid sklearn threading warning
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+import numpy as np
+import pandas as pd
+import pickle
+import dill
+import tdt
+import trompy as tp
+
+from scipy.optimize import curve_fit
+from scipy.spatial.distance import cdist
+from sklearn.decomposition import PCA
+from sklearn.cluster import SpectralClustering
+from sklearn.metrics import silhouette_score
+
+# Add src to path so we can import local modules
+SRC_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SRC_DIR))
+from extract_behav_parameters import (
+    get_ttls, read_DLC_csv, interpolate_low_likehood,
+    calc_bodypart_movement, calc_angular_velocity,
+    get_behav_snips, smooth_array,
+)
+
+# ──────────────────────────────────────────────────────────────────────
+# CONFIGURABLE PARAMETERS — edit these to change defaults
+# ──────────────────────────────────────────────────────────────────────
+PARAMS = {
+    # ── Paths ──
+    "data_folder": Path("data"),
+    "results_folder": Path("results"),
+    "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"),
+
+    # ── Behavioural metric ──
+    # Options: "movement" or "angular_velocity"
+    "behav_metric": "movement",
+
+    # ── DLC parameters ──
+    "dlc_likelihood_threshold": 0.6,
+    "dlc_bodyparts": None,  # None = all bodyparts; or list e.g. ["r_ear", "l_ear", "head_base"]
+    "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
+    "dlc_smooth_window": 10,
+    "dlc_zscore_to_baseline": True,
+
+    # ── Photometry parameters ──
+    "photo_pre_seconds": 5,
+    "photo_post_seconds": 15,
+    "photo_bins": 200,
+
+    # ── Conditions to exclude ──
+    "conditions_to_exclude": ["thirsty", "replete_exp"],
+
+    # ── Snip parameters for AUC calculation ──
+    "auc_start_bin": 50,   # bin index for start of infusion window
+    "auc_end_bin": 150,    # bin index for end of infusion window
+
+    # ── Velocity smoothing ──
+    "vel_smooth_window": 5,
+
+    # ── Clustering ──
+    "num_retained_pcs": 3,
+    "n_clusters": None,           # None = auto-select via silhouette sweep; or set to int to force
+    "max_n_clusters": 9,          # Maximum number of clusters to test in sweep
+    "clustering_affinity": "sigmoid",
+    "clustering_assign_labels": "discretize",
+
+    # ── Movement threshold for time_moving ──
+    "movement_threshold": 0.02,
+
+    # ── Sigmoidal transition fit ──
+    "transition_condition": "deplete",
+    "transition_infusion": "45NaCl",
+    "logistic_maxfev": 60000,
+
+    # ── Output ──
+    "output_filename": "assembled_data.pickle",
+
+    # ── Caching ──
+    # Set these to True to load from cached pickle instead of re-extracting.
+    # Cache files are saved automatically after each step.
+    # If the cache file doesn't exist, the step runs from scratch regardless.
+    "cache_behav": True,          # Skip DLC extraction, load from cache
+    "cache_photo": True,          # Skip TDT extraction, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+
+    # Cache filenames (in data_folder)
+    "cache_behav_file": "_cache_behav.pickle",
+    "cache_photo_file": "_cache_photo.pickle",
+    "cache_clustering_file": "_cache_clustering.pickle",
+    "cache_transitions_file": "_cache_transitions.pickle",
+}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# HELPER FUNCTIONS
+# ──────────────────────────────────────────────────────────────────────
+
+def _condition_map():
+    return {
+        "Sodium Depleted": "deplete",
+        "Sodium Replete": "replete",
+        "Sodium Replete Experienced": "replete_exp",
+        "Thirsty": "thirsty",
+    }
+
+def _infusion_map():
+    return {45: "45NaCl", 1: "10NaCl"}
+
+
+def _load_cache(cache_path, label):
+    """Try to load a cached pickle. Returns data or None."""
+    if cache_path.exists():
+        print(f"  Loading cached {label} from {cache_path}")
+        with open(cache_path, "rb") as f:
+            cached = dill.load(f)
+        if "_cached_at" in cached:
+            print(f"    cached at: {cached['_cached_at']}")
+        if "_cached_params" in cached:
+            p = cached["_cached_params"]
+            # Print a few key params so you can verify they match
+            summary = {k: v for k, v in p.items()
+                       if not k.startswith("cache") and k not in ("data_folder", "results_folder")}
+            print(f"    cached with params: {summary}")
+        return cached
+    else:
+        print(f"  No cache found at {cache_path}, running {label} from scratch.")
+        return None
+
+
+def _save_cache(data, cache_path, label, params=None):
+    """Save intermediate result to a cache pickle, including params and timestamp."""
+    from datetime import datetime
+    data["_cached_at"] = datetime.now().isoformat()
+    if params is not None:
+        # Convert Path objects to strings for cleaner serialization
+        data["_cached_params"] = {k: str(v) if isinstance(v, Path) else v
+                                   for k, v in params.items()}
+    with open(cache_path, "wb") as f:
+        dill.dump(data, f)
+    print(f"  Cached {label} saved to {cache_path}")
+
+
+def get_movement_vector(stub, dlc_folder, params):
+    """Get movement metric from DLC data for a single session."""
+    df = read_DLC_csv(stub, dlc_folder)
+    df = interpolate_low_likehood(df, threshold=params["dlc_likelihood_threshold"])
+    movement = calc_bodypart_movement(
+        df,
+        include_bodyparts=params["dlc_bodyparts"],
+        smooth_method=params["dlc_smooth_method"],
+        smooth_window=params["dlc_smooth_window"],
+    )
+    return movement
+
+
+def get_angular_velocity_vector(stub, dlc_folder, params):
+    """Get angular velocity from DLC data for a single session."""
+    df = read_DLC_csv(stub, dlc_folder)
+    df = interpolate_low_likehood(df, threshold=params["dlc_likelihood_threshold"])
+    df = calc_angular_velocity(df, rightear="r_ear", leftear="l_ear")
+    return df.d_angle_deg
+
+
+def get_behav_vector(stub, dlc_folder, params):
+    """Dispatch to the correct behavioural metric function."""
+    if params["behav_metric"] == "movement":
+        return get_movement_vector(stub, dlc_folder, params)
+    elif params["behav_metric"] == "angular_velocity":
+        return get_angular_velocity_vector(stub, dlc_folder, params)
+    else:
+        raise ValueError(f"Unknown behav_metric: {params['behav_metric']}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 1 & 2: Assemble photometry and behavioural snips
+# ──────────────────────────────────────────────────────────────────────
+
+def get_photometry_snips(tank, params):
+    """Extract photometry snips from a TDT tank."""
+    data = tdt.read_block(tank)
+    blue = data.streams["x65A"].data
+    uv = data.streams["x05A"].data
+    fs = data.streams["x05A"].fs
+
+    filtered_sig = tp.processdata(blue, uv, fs=fs)
+    sol = data.epocs.sol_.onset
+    snips = tp.snipper(
+        filtered_sig, sol, fs=fs,
+        pre=params["photo_pre_seconds"],
+        post=params["photo_post_seconds"],
+        bins=params["photo_bins"],
+    )[0]
+    return snips
+
+
+def assemble_photometry(params):
+    """Step 2: Assemble photometry snips and x_array from TDT tanks."""
+    print("\n" + "=" * 60)
+    print("STEP 2: Assembling photometry data from TDT tanks")
+    print("=" * 60)
+
+    data_folder = params["data_folder"]
+    tank_folder = params["tank_folder"]
+
+    meta_10 = pd.read_csv(data_folder / "10NaCl_FileKey.csv")
+    meta_45 = pd.read_csv(data_folder / "45NaCl_FileKey.csv")
+
+    def _assemble(metadata, infusion_label):
+        snips_list, x_list = [], []
+        for _, row in metadata.iterrows():
+            tank = tank_folder / row["Folder"]
+            print(f"  Photometry: {row['Folder']}", end=" ... ")
+            try:
+                s = get_photometry_snips(tank, params)
+                n = len(s)
+                print(f"{n} trials")
+                snips_list.append(s)
+                x_list.append(pd.DataFrame({
+                    "trial": np.arange(n),
+                    "id": row["Subject"],
+                    "condition": row["Physiological state"],
+                    "infusiontype": infusion_label,
+                }))
+            except Exception as e:
+                print(f"ERROR: {e}")
+        return snips_list, x_list
+
+    snips_10, x_10 = _assemble(meta_10, "10NaCl")
+    snips_45, x_45 = _assemble(meta_45, "45NaCl")
+
+    snips_all = np.vstack([np.concatenate(snips_10), np.concatenate(snips_45)])
+    x_all = (
+        pd.concat(x_10 + x_45, ignore_index=True)
+        .replace({"condition": _condition_map()})
+    )
+
+    # Add sex info
+    subjects_df = (
+        pd.concat([
+            pd.read_csv(data_folder / "10NaCl_SubjectKey.csv").iloc[:, :2],
+            pd.read_csv(data_folder / "45NaCl_SubjectKey.csv").iloc[:, :2],
+        ])
+        .drop_duplicates()
+        .rename(columns={"Subject": "id", "Sex": "sex"})
+    )
+    x_all = pd.merge(x_all, subjects_df, on="id", how="left")
+
+    # Filter conditions
+    mask = ~x_all.condition.isin(params["conditions_to_exclude"])
+    snips_all = snips_all[mask.values]
+    x_all = x_all[mask].reset_index(drop=True)
+
+    print(f"  Photometry assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
+    return snips_all, x_all
+
+
+def assemble_behaviour(params):
+    """Step 1: Assemble behavioural (DLC) snips and x_array."""
+    print("\n" + "=" * 60)
+    print(f"STEP 1: Assembling behavioural data ({params['behav_metric']})")
+    print("=" * 60)
+
+    data_folder = params["data_folder"]
+    dlc_folder = params["dlc_folder"]
+
+    meta_df = pd.concat([
+        pd.read_csv(data_folder / "10NaCl_FileKey.csv"),
+        pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
+    ])
+
+    snips_list, x_list = [], []
+    for _, row in meta_df.iterrows():
+        stub = row["Folder"]
+        print(f"  Behaviour: {stub}", end=" ... ")
+        try:
+            behav_vec = get_behav_vector(stub, dlc_folder, params)
+            solenoid_ts = get_ttls(stub, data_folder)
+            s = get_behav_snips(
+                solenoid_ts=solenoid_ts,
+                behav_vector=behav_vec,
+                zscore_to_baseline=params["dlc_zscore_to_baseline"],
+            )
+            n = len(s)
+            print(f"{n} trials")
+            snips_list.append(s)
+
+            infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
+            x_list.append(pd.DataFrame({
+                "trial": np.arange(n),
+                "id": row["Subject"],
+                "condition": row["Physiological state"],
+                "infusiontype": infusion_label,
+            }))
+        except Exception as e:
+            print(f"ERROR: {e}")
+
+    snips_all = np.concatenate(snips_list)
+    x_all = (
+        pd.concat(x_list, ignore_index=True)
+        .replace({"condition": _condition_map()})
+    )
+
+    # Add sex info
+    subjects_df = (
+        pd.concat([
+            pd.read_csv(data_folder / "10NaCl_SubjectKey.csv").iloc[:, :2],
+            pd.read_csv(data_folder / "45NaCl_SubjectKey.csv").iloc[:, :2],
+        ])
+        .drop_duplicates()
+        .rename(columns={"Subject": "id", "Sex": "sex"})
+    )
+    x_all = pd.merge(x_all, subjects_df, on="id", how="left")
+
+    # Filter conditions
+    mask = ~x_all.condition.isin(params["conditions_to_exclude"])
+    snips_all = snips_all[mask.values]
+    x_all = x_all[mask].reset_index(drop=True)
+
+    print(f"  Behaviour assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
+    return snips_all, x_all
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 3: Equalize and combine
+# ──────────────────────────────────────────────────────────────────────
+
+def equalize_datasets(x_photo, snips_photo, x_behav, snips_behav):
+    """
+    Step 3: Make sure photometry and behaviour datasets match row-for-row.
+    Finds common rows based on (trial, id, condition, infusiontype) and
+    removes extras from whichever is longer.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 3: Equalizing photometry and behaviour datasets")
+    print("=" * 60)
+
+    merge_cols = ["trial", "id", "condition", "infusiontype"]
+    df_p = x_photo[merge_cols].reset_index(drop=True)
+    df_b = x_behav[merge_cols].reset_index(drop=True)
+
+    if df_p.equals(df_b):
+        print("  Datasets already aligned.")
+        return x_photo, snips_photo, x_behav, snips_behav
+
+    # Find common rows via inner merge
+    merged = pd.merge(df_p.assign(_idx_p=df_p.index),
+                       df_b.assign(_idx_b=df_b.index),
+                       on=merge_cols, how="inner")
+
+    idx_p = merged["_idx_p"].values
+    idx_b = merged["_idx_b"].values
+
+    x_photo = x_photo.iloc[idx_p].reset_index(drop=True)
+    snips_photo = snips_photo[idx_p]
+    x_behav = x_behav.iloc[idx_b].reset_index(drop=True)
+    snips_behav = snips_behav[idx_b]
+
+    print(f"  After equalization: {len(x_photo)} trials (photo), {len(x_behav)} trials (behav)")
+    assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
+    return x_photo, snips_photo, x_behav, snips_behav
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 4: Clustering of photometry data
+# ──────────────────────────────────────────────────────────────────────
+
+def cluster_photometry(snips_photo, x_array, params):
+    """
+    Step 4: PCA + spectral clustering on photometry snips.
+    Adds cluster_photo column (0 or 1) to x_array.
+    Returns x_array, pca_transformed data.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 4: Spectral clustering of photometry data")
+    print("=" * 60)
+
+    num_pcs = params["num_retained_pcs"]
+
+    # PCA
+    pca = PCA(n_components=snips_photo.shape[1], whiten=True)
+    pca.fit(snips_photo)
+    transformed = pca.transform(snips_photo)
+
+    x = 100 * pca.explained_variance_ratio_
+    xprime = x - (x[0] + (x[-1] - x[0]) / (x.size - 1) * np.arange(x.size))
+    auto_pcs = np.argmin(xprime)
+    print(f"  Auto-detected PCs to keep: {auto_pcs}, using: {num_pcs}")
+
+    # Determine number of clusters
+    n_clusters = params["n_clusters"]
+    if n_clusters is None:
+        # Sweep through cluster numbers and pick best silhouette score
+        max_k = params["max_n_clusters"]
+        possible_n = np.arange(2, max_k + 1)
+        sil_scores = np.nan * np.ones(possible_n.size)
+
+        for idx, k in enumerate(possible_n):
+            m = SpectralClustering(
+                n_clusters=k,
+                affinity=params["clustering_affinity"],
+                assign_labels=params["clustering_assign_labels"],
+                random_state=0,
+            )
+            m.fit(transformed[:, :num_pcs])
+            sil_scores[idx] = silhouette_score(
+                transformed[:, :num_pcs], m.labels_, metric="cosine"
+            )
+            print(f"    k={k}: silhouette={sil_scores[idx]:.3f}")
+
+        best_idx = np.nanargmax(sil_scores)
+        n_clusters = int(possible_n[best_idx])
+        print(f"  Best silhouette at k={n_clusters} (score={sil_scores[best_idx]:.3f})")
+    else:
+        print(f"  Using fixed n_clusters={n_clusters}")
+
+    # Final clustering with chosen n_clusters
+    model = SpectralClustering(
+        n_clusters=n_clusters,
+        affinity=params["clustering_affinity"],
+        assign_labels=params["clustering_assign_labels"],
+        random_state=0,
+    )
+    model.fit(transformed[:, :num_pcs])
+    sil = silhouette_score(transformed[:, :num_pcs], model.labels_, metric="cosine")
+    print(f"  Final clustering: k={n_clusters}, silhouette={sil:.3f}")
+
+    # Reorder clusters so cluster 0 = most positive response during infusion
+    # This matches the reorder_clusters function from spectral_clustering_all_trials.ipynb
+    pre_window = int(params["photo_pre_seconds"] * 10)  # 50 bins
+    uniquelabels = list(set(model.labels_))
+    responses = np.nan * np.ones((len(uniquelabels),))
+    for l, label in enumerate(uniquelabels):
+        responses[l] = np.mean(snips_photo[model.labels_ == label, pre_window:2 * pre_window])
+    temp = np.argsort(responses).astype(int)[::-1]
+    temp = np.array([np.where(temp == a)[0][0] for a in uniquelabels])
+    newlabels = np.array([temp[a] for a in list(np.digitize(model.labels_, uniquelabels) - 1)])
+
+    x_array = x_array.assign(cluster_photo=newlabels)
+    print(f"  Cluster counts: {dict(zip(*np.unique(newlabels, return_counts=True)))}")
+
+    return x_array, transformed
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 5: Cluster distances (clusterness + euclidean)
+# ──────────────────────────────────────────────────────────────────────
+
+def compute_cluster_distances(x_array, pca_data, params):
+    """
+    Step 5: Compute clusterness (projection onto cluster vector) and
+    euclidean distance difference for each trial.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 5: Computing cluster distances")
+    print("=" * 60)
+
+    num_pcs = params["num_retained_pcs"]
+    pca_subset = pca_data[:, :num_pcs]
+
+    centroid_0 = pca_subset[x_array.cluster_photo == 0].mean(axis=0)
+    centroid_1 = pca_subset[x_array.cluster_photo == 1].mean(axis=0)
+
+    # Clusterness (projection)
+    cluster_vector = centroid_0 - centroid_1
+    cluster_vector_norm = cluster_vector / np.linalg.norm(cluster_vector)
+    projections = np.dot(pca_subset - centroid_1, cluster_vector_norm)
+    normalized = (projections - projections.min()) / (projections.max() - projections.min())
+    x_array = x_array.assign(clusterness_photo=normalized)
+
+    # Euclidean distance difference
+    centroids = np.vstack([centroid_0, centroid_1])
+    distances = cdist(pca_subset, centroids, metric="euclidean")
+    x_array = x_array.assign(euclidean_diff=distances[:, 1] - distances[:, 0])
+
+    print("  Added clusterness_photo and euclidean_diff columns.")
+    return x_array
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 6: Sigmoidal transition fitting
+# ──────────────────────────────────────────────────────────────────────
+
+def _logistic4(x, A, L, x0, k):
+    return A + (L - A) / (1 + np.exp(-k * (x - x0)))
+
+def _logistic3(x, L, x0, k):
+    return L / (1 + np.exp(-k * (x - x0)))
+
+
+def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60000):
+    """Fit a logistic curve to binary/near-binary data with robust inits."""
+    if x is None:
+        x = np.arange(len(y), dtype=float)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    # Normalize x
+    x_mean, x_std = float(np.mean(x)), float(np.std(x))
+    if not np.isfinite(x_std) or x_std == 0:
+        x_std = 1.0
+    x_norm = (x - x_mean) / x_std
+    y_clip = np.clip(y, 1e-4, 1 - 1e-4)
+
+    y_min, y_max = float(np.min(y_clip)), float(np.max(y_clip))
+    A_init, L_init, x0_init = y_min, y_max, 0.0
+
+    if direction is None:
+        try:
+            c = float(np.corrcoef(x, y_clip)[0, 1])
+        except Exception:
+            c = 0.0
+        if not np.isfinite(c):
+            c = 0.0
+        sign = 1.0 if c >= 0 else -1.0
+    else:
+        sign = 1.0 if direction == "increasing" else -1.0
+
+    k_mags = [0.5, 1.0, 2.0]
+
+    def try_fit(func, p0_list, bounds):
+        best, best_rss = None, np.inf
+        for p0 in p0_list:
+            try:
+                popt, _ = curve_fit(func, x_norm, y_clip, p0=p0, bounds=bounds, maxfev=maxfev)
+                y_hat = func(x_norm, *popt)
+                rss = float(np.sum((y_clip - y_hat) ** 2))
+                if rss < best_rss:
+                    best_rss, best = rss, (popt, y_hat)
+            except Exception:
+                continue
+        return best
+
+    res4 = None
+    if prefer_4p:
+        p0s_4 = [[A_init, L_init, x0_init, sign * km] for km in k_mags]
+        bnds_4 = ([-0.1, 0.4, -3.0, -10.0], [0.6, 1.6, 3.0, 10.0])
+        res4 = try_fit(_logistic4, p0s_4, bnds_4)
+
+    p0s_3 = [[L_init, x0_init, sign * km] for km in k_mags]
+    bnds_3 = ([0.4, -3.0, -10.0], [1.6, 3.0, 10.0])
+    res3 = try_fit(_logistic3, p0s_3, bnds_3)
+
+    if res4 is not None:
+        popt, y_hat = res4
+        A, L, x0n, k = map(float, popt)
+        x0_orig = x0n * x_std + x_mean
+        return {"model": "logistic4", "x0_orig": x0_orig, "k": k,
+                "params": {"A": A, "L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
+                "y_hat": y_hat, "success": True, "note": ""}
+    elif res3 is not None:
+        popt, y_hat = res3
+        L, x0n, k = map(float, popt)
+        x0_orig = x0n * x_std + x_mean
+        return {"model": "logistic3", "x0_orig": x0_orig, "k": k,
+                "params": {"L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
+                "y_hat": y_hat, "success": True, "note": "4p failed; used 3p"}
+    else:
+        return {"model": None, "x0_orig": np.nan, "k": np.nan,
+                "params": {}, "y_hat": None, "success": False, "note": "fit failed"}
+
+
+def find_sigmoidal_transitions(x_array, params):
+    """
+    Step 6: Fit sigmoidal transitions per rat for deplete + 45NaCl.
+    Uses raw cluster assignments (binary).
+    Returns fits_df with transition points.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 6: Finding sigmoidal transitions")
+    print("=" * 60)
+
+    cond = params["transition_condition"]
+    inf = params["transition_infusion"]
+    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
+
+    all_fits = []
+    for rat in df_dep_45.id.unique():
+        sig = df_dep_45.loc[df_dep_45.id == rat, "cluster_photo"].to_numpy()
+        y = np.logical_not(sig).astype(int)
+        x = np.arange(len(y), dtype=float)
+
+        fit = fit_logistic_per_series(y, x=x, prefer_4p=True, direction="decreasing",
+                                      maxfev=params["logistic_maxfev"])
+        all_fits.append({
+            "id": rat,
+            **fit["params"],
+            "model": fit["model"],
+            "x0_orig": fit["x0_orig"],
+            "success": fit["success"],
+            "note": fit["note"],
+        })
+
+    fits_df = pd.DataFrame(all_fits)
+    fits_df = fits_df.query("success == True and x0_orig > 0").copy()
+
+    print(f"  Successful fits: {len(fits_df)} / {len(df_dep_45.id.unique())} rats")
+    print(f"  Transition points: {fits_df.x0_orig.round(1).tolist()}")
+    return fits_df
+
+
+# ──────────────────────────────────────────────────────────────────────
+# STEP 7: Combine and realign
+# ──────────────────────────────────────────────────────────────────────
+
+def get_time_moving(snips, threshold=0.02, start_bin=50, end_bin=150):
+    """Calculate proportion of time spent moving per trial."""
+    moving = []
+    for i in range(snips.shape[0]):
+        snip = snips[i, start_bin:end_bin]
+        tmp = len([x for x in snip if x > threshold]) / len(snip)
+        moving.append(tmp)
+    return np.array(moving)
+
+
+def combine_and_realign(x_photo, snips_photo, snips_behav, fits_df, params):
+    """
+    Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
+    """
+    print("\n" + "=" * 60)
+    print("STEP 7: Combining data and realigning trials")
+    print("=" * 60)
+
+    # Smooth velocity snips
+    snips_vel_smooth = smooth_array(snips_behav, window_size=params["vel_smooth_window"])
+
+    # Calculate AUCs
+    s, e = params["auc_start_bin"], params["auc_end_bin"]
+    auc_snips = snips_photo[:, s:e].mean(axis=1)
+    auc_vel = snips_vel_smooth[:, s:e].mean(axis=1)
+
+    # Calculate time moving
+    time_moving = get_time_moving(snips_behav, threshold=params["movement_threshold"],
+                                   start_bin=s, end_bin=e)
+
+    x_combined = x_photo.assign(
+        auc_snips=auc_snips,
+        auc_vel=auc_vel,
+        time_moving=time_moving,
+    )
+
+    # Now realign the deplete+45NaCl subset
+    cond = params["transition_condition"]
+    inf = params["transition_infusion"]
+    df_dep45 = x_combined.query("condition == @cond & infusiontype == @inf").reset_index(drop=True)
+
+    # Add trial_aligned column using sigmoidal fit transition points
+    realigned = []
+    for rat in df_dep45.id.unique():
+        rat_trials = df_dep45.query("id == @rat")
+        if rat not in fits_df.id.values:
+            print(f"  Rat {rat} not in fits, skipping for realignment.")
+            realigned.extend([np.nan] * len(rat_trials))
+        else:
+            transition = int(fits_df.query("id == @rat").x0_orig.values[0])
+            realigned.extend((rat_trials.trial - transition).tolist())
+
+    z = (
+        df_dep45
+        .assign(trial_aligned=realigned)
+        .dropna()
+        .reset_index(drop=True)
+    )
+
+    print(f"  Combined x_array: {len(x_combined)} trials")
+    print(f"  Realigned deplete+45NaCl subset: {len(z)} trials")
+
+    return x_combined, z
+
+
+# ──────────────────────────────────────────────────────────────────────
+# MAIN PIPELINE
+# ──────────────────────────────────────────────────────────────────────
+
+def run_pipeline(params=None):
+    """Run the full data assembly pipeline."""
+    if params is None:
+        params = PARAMS
+
+    print("=" * 60)
+    print("BAZZINO DATA ASSEMBLY PIPELINE")
+    print("=" * 60)
+    print(f"  Behaviour metric: {params['behav_metric']}")
+    print(f"  DLC folder: {params['dlc_folder']}")
+    print(f"  Tank folder: {params['tank_folder']}")
+    print(f"  Caching: behav={params['cache_behav']}, photo={params['cache_photo']}, "
+          f"clustering={params['cache_clustering']}, transitions={params['cache_transitions']}")
+
+    data_folder = params["data_folder"]
+
+    # Step 1: Behaviour
+    behav_cache_path = data_folder / params["cache_behav_file"]
+    if params["cache_behav"]:
+        cached = _load_cache(behav_cache_path, "behaviour")
+    else:
+        cached = None
+    if cached is not None:
+        snips_behav, x_behav = cached["snips_behav"], cached["x_behav"]
+        print(f"  Behaviour from cache: {snips_behav.shape[0]} trials")
+    else:
+        snips_behav, x_behav = assemble_behaviour(params)
+        _save_cache({"snips_behav": snips_behav, "x_behav": x_behav},
+                    behav_cache_path, "behaviour", params)
+
+    # Step 2: Photometry
+    photo_cache_path = data_folder / params["cache_photo_file"]
+    if params["cache_photo"]:
+        cached = _load_cache(photo_cache_path, "photometry")
+    else:
+        cached = None
+    if cached is not None:
+        snips_photo, x_photo = cached["snips_photo"], cached["x_photo"]
+        print(f"  Photometry from cache: {snips_photo.shape[0]} trials")
+    else:
+        snips_photo, x_photo = assemble_photometry(params)
+        _save_cache({"snips_photo": snips_photo, "x_photo": x_photo},
+                    photo_cache_path, "photometry", params)
+
+    # Step 3: Equalize
+    x_photo, snips_photo, x_behav, snips_behav = equalize_datasets(
+        x_photo, snips_photo, x_behav, snips_behav
+    )
+
+    # Step 4: Clustering
+    clustering_cache_path = data_folder / params["cache_clustering_file"]
+    if params["cache_clustering"]:
+        cached = _load_cache(clustering_cache_path, "clustering")
+    else:
+        cached = None
+    if cached is not None:
+        x_combined, pca_transformed = cached["x_combined"], cached["pca_transformed"]
+        print(f"  Clustering from cache: {len(x_combined)} trials")
+    else:
+        x_combined, pca_transformed = cluster_photometry(snips_photo, x_photo, params)
+        # Step 5 always runs with fresh clustering
+        x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
+        _save_cache({"x_combined": x_combined, "pca_transformed": pca_transformed},
+                    clustering_cache_path, "clustering", params)
+
+    # Step 5: Cluster distances (only if loaded from cache, otherwise already done above)
+    if cached is not None:
+        x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
+
+    # Step 6: Sigmoidal transitions
+    transitions_cache_path = data_folder / params["cache_transitions_file"]
+    if params["cache_transitions"]:
+        cached = _load_cache(transitions_cache_path, "transitions")
+    else:
+        cached = None
+    if cached is not None:
+        fits_df = cached["fits_df"]
+        print(f"  Transitions from cache: {len(fits_df)} fits")
+    else:
+        fits_df = find_sigmoidal_transitions(x_combined, params)
+        _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
+
+    # Step 7: Combine and realign
+    x_combined, z_dep45 = combine_and_realign(
+        x_combined, snips_photo, snips_behav, fits_df, params
+    )
+
+    # Save output
+    output = {
+        "x_array": x_combined,
+        "snips_photo": snips_photo,
+        "snips_behav": snips_behav,
+        "pca_transformed": pca_transformed,
+        "fits_df": fits_df,
+        "z_dep45": z_dep45,
+        "params": params,
+    }
+
+    output_path = params["data_folder"] / params["output_filename"]
+    with open(output_path, "wb") as f:
+        dill.dump(output, f)
+
+    print("\n" + "=" * 60)
+    print(f"DONE! Saved to {output_path}")
+    print("=" * 60)
+    print(f"  x_array shape:     {x_combined.shape}")
+    print(f"  snips_photo shape: {snips_photo.shape}")
+    print(f"  snips_behav shape: {snips_behav.shape}")
+    print(f"  z_dep45 shape:     {z_dep45.shape}")
+    print(f"  fits_df shape:     {fits_df.shape}")
+
+    return output
+
+
+if __name__ == "__main__":
+    # Change to project root so relative paths work
+    project_root = SRC_DIR.parent
+    os.chdir(project_root)
+
+    run_pipeline(PARAMS)
