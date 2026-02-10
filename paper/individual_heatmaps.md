@@ -8,7 +8,7 @@ The 'best' bodyparts from visual inspection appear to be [r_ear, l_ear, head_bas
 <div style="page-break-before: always;"></div>
 
 ## Using movement metric
-The following figure uses a movement metric that includes [r_ear, l_ear, head_base] (I think, need to double check). Gaussian smoothing with windowsize=10 is used. Each bodypart is zscored to itself and then summed. No baseline zscoring is done.
+The following figure uses a movement metric that includes [r_ear, l_ear, head_base] (I think, need to double check). Gaussian smoothing with windowsize=10 is used. ~~Each bodypart is zscored to itself~~ and then summed. No baseline zscoring is done.
 Each row is a different rat. Col. 1 is heatmap, col. 2 is median of infusion time, col.3 is time moving during infusion (threshold of 0.02), col.4 is histogram of movement metric for all bins/trials. Black line shows threshold for movement (0.02). The red triangle/dashed lines show transition point from dopamine data.
 
 ![Figure 2](../results/figure_snips_movement_deplete_45NaCl_individualrats.png)
