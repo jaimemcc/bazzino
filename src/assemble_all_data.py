@@ -107,7 +107,7 @@ PARAMS = {
     # Set these to True to load from cached pickle instead of re-extracting.
     # Cache files are saved automatically after each step.
     # If the cache file doesn't exist, the step runs from scratch regardless.
-    "cache_behav": True,          # Skip DLC extraction, load from cache
+    "cache_behav": False,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
