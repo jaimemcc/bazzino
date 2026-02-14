@@ -68,7 +68,7 @@ PARAMS = {
     "dlc_likelihood_threshold": 0.6,
     "dlc_bodyparts": ["r_ear", "l_ear", "head_base"],  # None = all bodyparts; or list e.g. ["r_ear", "l_ear", "head_base"]
     "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
-    "dlc_smooth_window": 10,
+    "dlc_smooth_window": 5,
     "dlc_zscore_to_baseline": False,
 
     # ── Photometry parameters ──
@@ -96,7 +96,7 @@ PARAMS = {
     # ── Movement analysis parameters ──
     "normalize_movement": True,              # Normalize to [0,1] by default
     "movement_threshold": 0.02,              # Threshold for normalized movement
-    "calculate_raw_movement": False,         # Optional: also analyze raw pixels
+    "calculate_raw_movement": True,         # Optional: also analyze raw pixels
     "movement_threshold_raw": 0.5,           # Threshold for raw pixel movement (pixels/frame)
 
     # ── Sigmoidal transition fit ──

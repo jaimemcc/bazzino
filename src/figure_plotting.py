@@ -58,6 +58,33 @@ def scale_vlim_to_data(snips, percentile=99):
     return -vlim, vlim
 
 
+def calculate_ylims(snips_arrays, pad_percentage=5):
+    """
+    Calculate automatic y-axis limits based on data range with padding.
+    
+    Computes the min and max across all provided snips arrays, then adds
+    padding as a percentage of the range. Useful for setting consistent
+    y-limits across multiple time series plots.
+    
+    :param snips_arrays: List of snips arrays (each is 2D: samples x timepoints)
+    :param pad_percentage: Percentage of data range to use as padding (default 5%)
+    :return: Tuple of (ymin, ymax) suitable for ax.set_ylim()
+    """
+    # Flatten all data and find global min/max
+    all_data = np.concatenate([arr.flatten() for arr in snips_arrays])
+    data_min = np.nanmin(all_data)
+    data_max = np.nanmax(all_data)
+    
+    # Calculate range and add padding
+    data_range = data_max - data_min
+    padding = (data_range * pad_percentage) / 100
+    
+    ymin = data_min - padding
+    ymax = data_max + padding
+    
+    return ymin, ymax
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Data Extraction Functions
 # ──────────────────────────────────────────────────────────────────────
