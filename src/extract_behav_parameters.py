@@ -133,13 +133,13 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
     )
     
 def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
-                          include_bodyparts=None, exclude_bodyparts=None):
+                          include_bodyparts=None, exclude_bodyparts=None, normalize=True):
     """
-    Calculate overall bodypart movement across time, normalized to [0, 1].
+    Calculate overall bodypart movement across time.
     
-    Computes frame-to-frame displacement for each bodypart, optionally weights
-    by z-scored movement, applies smoothing to remove jitter, and normalizes 
-    to [0, 1] range where 0 = no movement and 1 = maximum movement.
+    Computes frame-to-frame displacement for each bodypart (in pixels), optionally weights
+    by z-scored movement, applies smoothing to remove jitter, and optionally normalizes 
+    to [0, 1] range.
     
     Parameters
     ----------
@@ -164,11 +164,15 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
     exclude_bodyparts : list of str, optional
         If provided, these bodyparts will be excluded from the calculation.
         Example: ['rightear']. Cannot be used together with include_bodyparts.
+    normalize : bool, default True
+        If True, normalize movement to [0, 1] range using min-max scaling.
+        If False, return raw average pixels per bodypart per frame.
     
     Returns
     -------
     pd.Series
-        Normalized movement for each frame, values in [0, 1]
+        Movement for each frame. If normalize=True (default), values are in [0, 1].
+        If normalize=False, values are in pixels (average across bodyparts).
     
     Raises
     ------
@@ -181,7 +185,7 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
       'bodypart_x' and 'bodypart_y'.
     - Likelihood columns are ignored.
     - Frame-to-frame distance is calculated as sqrt(dx^2 + dy^2).
-    - Values are averaged across bodyparts and normalized to [0, 1].
+    - Values are averaged across bodyparts.
     - With smoothing, edge frames may be affected depending on method.
     """
     if include_bodyparts is not None and exclude_bodyparts is not None:
@@ -263,20 +267,26 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
                 smoothed_values = savgol_filter(values, window, polyorder, mode='nearest')
                 total_movement = pd.Series(smoothed_values, index=total_movement.index)
         
-        # Normalize to [0, 1] using min-max scaling
-        min_val = total_movement.min()
-        max_val = total_movement.max()
-        
-        if max_val > min_val:
-            normalized = (total_movement - min_val) / (max_val - min_val)
+        # Normalize to [0, 1] using min-max scaling if requested
+        if normalize:
+            min_val = total_movement.min()
+            max_val = total_movement.max()
+            
+            if max_val > min_val:
+                normalized = (total_movement - min_val) / (max_val - min_val)
+            else:
+                # All values are the same, return zeros
+                normalized = pd.Series(0.0, index=total_movement.index)
+            return normalized
         else:
-            # All values are the same, return zeros
-            normalized = pd.Series(0.0, index=df.index)
+            # Return raw pixel movement
+            return total_movement
     else:
         # No valid bodyparts found
-        normalized = pd.Series(0.0, index=df.index)
-    
-    return normalized
+        if normalize:
+            return pd.Series(0.0, index=df.index)
+        else:
+            return pd.Series(0.0, index=df.index)
 
 def get_behav_snips(behav_vector,
                     solenoid_ts,
