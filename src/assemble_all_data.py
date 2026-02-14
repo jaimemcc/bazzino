@@ -108,10 +108,10 @@ PARAMS = {
     # Set these to True to load from cached pickle instead of re-extracting.
     # Cache files are saved automatically after each step.
     # If the cache file doesn't exist, the step runs from scratch regardless.
-    "cache_behav": False,          # Skip DLC extraction, load from cache
+    "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -574,18 +574,28 @@ def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60
         popt, y_hat = res4
         A, L, x0n, k = map(float, popt)
         x0_orig = x0n * x_std + x_mean
-        return {"model": "logistic4", "x0_orig": x0_orig, "k": k,
+        # Calculate R-squared
+        ss_res = float(np.sum((y_clip - y_hat) ** 2))
+        ss_tot = float(np.sum((y_clip - np.mean(y_clip)) ** 2))
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        return {"model": "logistic4", "x0_orig": x0_orig, "k": k, "r_squared": r_squared,
                 "params": {"A": A, "L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
                 "y_hat": y_hat, "success": True, "note": ""}
     elif res3 is not None:
         popt, y_hat = res3
         L, x0n, k = map(float, popt)
         x0_orig = x0n * x_std + x_mean
-        return {"model": "logistic3", "x0_orig": x0_orig, "k": k,
-                "params": {"L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
+        # Calculate R-squared
+        ss_res = float(np.sum((y_clip - y_hat) ** 2))
+        ss_tot = float(np.sum((y_clip - np.mean(y_clip)) ** 2))
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        # For 3p model, A is implicitly 0 (the function is A + (L-A)/(1+exp(...)) with A=0)
+        A = 0.0
+        return {"model": "logistic3", "x0_orig": x0_orig, "k": k, "r_squared": r_squared,
+                "params": {"A": A, "L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
                 "y_hat": y_hat, "success": True, "note": "4p failed; used 3p"}
     else:
-        return {"model": None, "x0_orig": np.nan, "k": np.nan,
+        return {"model": None, "x0_orig": np.nan, "k": np.nan, "r_squared": np.nan,
                 "params": {}, "y_hat": None, "success": False, "note": "fit failed"}
 
 
@@ -616,6 +626,8 @@ def find_sigmoidal_transitions(x_array, params):
             **fit["params"],
             "model": fit["model"],
             "x0_orig": fit["x0_orig"],
+            "k": fit["k"],
+            "r_squared": fit["r_squared"],
             "success": fit["success"],
             "note": fit["note"],
         })
@@ -668,31 +680,33 @@ def combine_and_realign(x_photo, snips_photo, snips_behav, fits_df, params):
         time_moving=time_moving,
     )
 
-    # Now realign the deplete+45NaCl subset
+    # Add trial_aligned column for ALL trials (NaN for rats without fits)
+    trial_aligned = []
+    for idx, row in x_combined.iterrows():
+        rat_id = row['id']
+        if rat_id not in fits_df.id.values:
+            # No fit for this rat
+            trial_aligned.append(np.nan)
+        else:
+            # Rat has a fit - calculate relative trial number
+            transition = int(fits_df.query("id == @rat_id").x0_orig.values[0])
+            trial_aligned.append(row['trial'] - transition)
+    
+    x_combined = x_combined.assign(trial_aligned=trial_aligned)
+
+    # Now realign the deplete+45NaCl subset (with NaN values dropped)
     cond = params["transition_condition"]
     inf = params["transition_infusion"]
-    df_dep45 = x_combined.query("condition == @cond & infusiontype == @inf").reset_index(drop=True)
-
-    # Add trial_aligned column using sigmoidal fit transition points
-    realigned = []
-    for rat in df_dep45.id.unique():
-        rat_trials = df_dep45.query("id == @rat")
-        if rat not in fits_df.id.values:
-            print(f"  Rat {rat} not in fits, skipping for realignment.")
-            realigned.extend([np.nan] * len(rat_trials))
-        else:
-            transition = int(fits_df.query("id == @rat").x0_orig.values[0])
-            realigned.extend((rat_trials.trial - transition).tolist())
-
     z = (
-        df_dep45
-        .assign(trial_aligned=realigned)
-        .dropna()
+        x_combined
+        .query("condition == @cond & infusiontype == @inf")
+        .dropna(subset=['trial_aligned'])
         .reset_index(drop=True)
     )
 
     print(f"  Combined x_array: {len(x_combined)} trials")
-    print(f"  Realigned deplete+45NaCl subset: {len(z)} trials")
+    print(f"  Added trial_aligned column (NaN for {(x_combined['trial_aligned'].isna()).sum()} trials without fits)")
+    print(f"  Realigned deplete+45NaCl subset: {len(z)} trials with valid alignments")
 
     return x_combined, z
 
