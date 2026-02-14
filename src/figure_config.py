@@ -8,6 +8,7 @@ consistency in colors, paths, and styling.
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
+from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
 # ──────────────────────────────────────────────────────────────────────
@@ -37,8 +38,8 @@ COLOR_MAP = {
     ("deplete", "45NaCl"): COLORS[3],
 }
 
-# Default colormap for heatmaps
-HEATMAP_CMAP = sns.diverging_palette(145, 300, s=60, as_cmap=True)
+# Custom diverging colormap for heatmaps: blue (negative) - white (neutral) - red (positive)
+HEATMAP_CMAP = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
 
 # ──────────────────────────────────────────────────────────────────────
 # Paths
