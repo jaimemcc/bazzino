@@ -653,10 +653,10 @@ def combine_and_realign(x_photo, snips_photo, snips_behav, fits_df, params):
     # Smooth velocity snips
     snips_vel_smooth = smooth_array(snips_behav, window_size=params["vel_smooth_window"])
 
-    # Calculate AUCs
+    # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    auc_snips = snips_photo[:, s:e].mean(axis=1)
-    auc_vel = snips_vel_smooth[:, s:e].mean(axis=1)
+    auc_snips = np.array([np.trapz(snips_photo[i, s:e]) for i in range(len(snips_photo))])
+    auc_vel = np.array([np.trapz(snips_vel_smooth[i, s:e]) for i in range(len(snips_vel_smooth))])
 
     # Calculate time moving
     time_moving = get_time_moving(snips_behav, threshold=params["movement_threshold"],
