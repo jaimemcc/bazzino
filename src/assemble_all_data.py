@@ -57,7 +57,8 @@ PARAMS = {
     "data_folder": Path("data"),
     "results_folder": Path("results"),
     "tank_folder": Path("D:/TestData/bazzino/from_paula"),
-    "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"),
+    # "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
+    "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
 
     # ── Behavioural metric ──
     # Options: "movement" or "angular_velocity"
@@ -68,7 +69,7 @@ PARAMS = {
     "dlc_bodyparts": None,  # None = all bodyparts; or list e.g. ["r_ear", "l_ear", "head_base"]
     "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
     "dlc_smooth_window": 10,
-    "dlc_zscore_to_baseline": True,
+    "dlc_zscore_to_baseline": False,
 
     # ── Photometry parameters ──
     "photo_pre_seconds": 5,
@@ -108,9 +109,9 @@ PARAMS = {
     # Cache files are saved automatically after each step.
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": False,          # Skip DLC extraction, load from cache
-    "cache_photo": False,          # Skip TDT extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+    "cache_photo": True,          # Skip TDT extraction, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -787,6 +788,17 @@ def run_pipeline(params=None):
         x_combined, snips_photo, snips_behav, fits_df, params
     )
 
+    # Create metadata about data processing
+    metadata = {
+        "behav_smoothed": params["dlc_smooth_method"] is not None,
+        "behav_smooth_method": params["dlc_smooth_method"],
+        "behav_smooth_window": params["dlc_smooth_window"] if params["dlc_smooth_method"] is not None else None,
+        "behav_zscored": params["dlc_zscore_to_baseline"],
+        "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
+        "photo_zscored": True,  # Photometry is z-scored by trompy during processing
+        "behav_metric": params["behav_metric"],
+    }
+
     # Save output
     output = {
         "x_array": x_combined,
@@ -795,6 +807,7 @@ def run_pipeline(params=None):
         "pca_transformed": pca_transformed,
         "fits_df": fits_df,
         "z_dep45": z_dep45,
+        "metadata": metadata,
         "params": params,
     }
 
@@ -810,6 +823,12 @@ def run_pipeline(params=None):
     print(f"  snips_behav shape: {snips_behav.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
+    print(f"\nData processing metadata:")
+    print(f"  Behaviour metric:    {metadata['behav_metric']}")
+    print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
+    print(f"  Behaviour z-scored:  {metadata['behav_zscored']}")
+    print(f"  Photometry smoothed: {metadata['photo_smoothed']}")
+    print(f"  Photometry z-scored: {metadata['photo_zscored']}")
 
     return output
 

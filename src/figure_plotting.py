@@ -24,6 +24,40 @@ def smooth_array(arr, window_size=5):
     return smoothed
 
 
+def conditionally_smooth(snips, should_smooth, window_size=5):
+    """
+    Conditionally apply smoothing based on metadata.
+    
+    Use this function to handle both pre-smoothed and non-smoothed data.
+    Check the 'metadata' dict from assembled_data.pickle to determine if smoothing is needed.
+    
+    :param snips: 2D array of snips (samples x timepoints)
+    :param should_smooth: Boolean; if True, apply smoothing; if False, return as-is
+    :param window_size: Smoothing window size (only used if should_smooth=True)
+    :return: Snips array (smoothed or original)
+    """
+    if should_smooth:
+        return smooth_array(snips, window_size=window_size)
+    else:
+        return snips
+
+
+def scale_vlim_to_data(snips, percentile=99):
+    """
+    Calculate symmetric colorbar limits based on data distribution.
+    
+    Useful for automatically scaling heatmap colormaps to the data range
+    instead of using hard-coded limits. This ensures consistent visualization
+    across different datasets and conditions.
+    
+    :param snips: 2D array of data (samples x timepoints)
+    :param percentile: Percentile of absolute values to use as limit (default 99)
+    :return: Tuple of (vmin, vmax) suitable for sns.heatmap(vmin=vmin, vmax=vmax)
+    """
+    vlim = np.percentile(np.abs(snips), percentile)
+    return -vlim, vlim
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Data Extraction Functions
 # ──────────────────────────────────────────────────────────────────────
@@ -132,7 +166,7 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
     
     :param data: 2D array for heatmap (rows=trials, cols=timepoints)
     :param ax: matplotlib axis to plot on
-    :param vlim: symmetric limit for colorbar (vmin=-vlim, vmax=vlim)
+    :param vlim: tuple of (vmin, vmax) for colorbar limits (e.g., from scale_vlim_to_data)
     :param cbar_ax: axis for colorbar (if None, no colorbar shown)
     :param inf_bar: if True, draw a small line at bottom indicating infusion window (50-150 bins)
     :param cmap: colormap to use (if None, uses default diverging colormap)
@@ -142,13 +176,14 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
         cmap = HEATMAP_CMAP
         
     has_cbar = cbar_ax is not None
+    vmin, vmax = vlim  # Unpack tuple
         
     sns.heatmap(np.array(data),
                 cmap=cmap,
                 ax=ax,
                 cbar=has_cbar,
                 cbar_ax=cbar_ax,
-                vmin=-vlim, vmax=vlim
+                vmin=vmin, vmax=vmax
                 )
     
     if cbar_ax is not None:

@@ -57,18 +57,42 @@ FIGSFOLDER.mkdir(parents=True, exist_ok=True)
 # Visualization Parameters
 # ──────────────────────────────────────────────────────────────────────
 
-# Heatmap settings
-HEATMAP_VLIM_BEHAV = 4.5  # Movement data heatmap limits
-HEATMAP_VLIM_PHOTO = 0.5  # Photometry data heatmap limits
+# Heatmap settings (STATIC SCALING — hardcoded values)
+# For dynamic scaling based on data distribution, use scale_vlim_to_data() from figure_plotting
+# Example: vmin, vmax = scale_vlim_to_data(snips, percentile=99)
+HEATMAP_VLIM_BEHAV = 4.5  # Movement data heatmap limits (static)
+HEATMAP_VLIM_PHOTO = 0.5  # Photometry data heatmap limits (static)
+
+# Alternative: Use dynamic scaling percentile
+# HEATMAP_PERCENTILE_BEHAV = 99  # Use 99th percentile of absolute values
+# HEATMAP_PERCENTILE_PHOTO = 99  # Use 99th percentile of absolute values
 
 # Snips plot settings
-YLIMS_BEHAV = [-3, 3]  # Movement snips y-axis limits
+YLIMS_BEHAV = [-0.02, 0.02]  # Movement snips y-axis limits
 YLIMS_PHOTO = [-0.5, 0.5]  # Photometry snips y-axis limits
 
 # Time series settings
 TIMEPOINTS_PER_SECOND = 10  # For converting bins to seconds
 INFUSION_START_BIN = 50  # Start of infusion window
 INFUSION_END_BIN = 150  # End of infusion window
+
+# ──────────────────────────────────────────────────────────────────────
+# Data Processing Status
+# ──────────────────────────────────────────────────────────────────────
+
+# NOTE: These values are determined during data assembly in assemble_all_data.py.
+# They are stored in the 'metadata' field of assembled_data.pickle.
+# These are the DEFAULT expected values — actual values should be read from metadata.
+#
+# Behavioral data (movement/angular velocity):
+#   - Smoothed during assembly (Gaussian smoothing, window=10)
+#   - Z-scored to baseline (pre-infusion window)
+#   → Do NOT smooth or z-score again in notebooks
+#
+# Photometry data (dopamine):
+#   - NOT smoothed during assembly
+#   - Z-scored by trompy during signal processing
+#   → Do NOT smooth or z-score again in notebooks
 
 # ──────────────────────────────────────────────────────────────────────
 # Data Settings
@@ -78,9 +102,12 @@ INFUSION_END_BIN = 150  # End of infusion window
 CONDITIONS = ["replete", "deplete"]
 INFUSION_TYPES = ["10NaCl", "45NaCl"]
 
-# Data smoothing
-BEHAV_SMOOTH_WINDOW = 5  # Moving average window for behavioral data
-PHOTO_SMOOTH_WINDOW = 1  # Moving average window for photometry data (no smoothing by default)
+# NOTE: Behavioral smoothing is done during assembly, not during plotting
+# These parameters are kept for reference only and should NOT be applied to snips
+BEHAV_SMOOTH_WINDOW = 5  # Reference only — behavior is already smoothed
+
+# Photometry data is NOT smoothed, so keeping this as reference
+PHOTO_SMOOTH_WINDOW = 1  # Reference only — photometry is NOT smoothed
 
 # ──────────────────────────────────────────────────────────────────────
 # Figure Control
