@@ -101,8 +101,13 @@ def interpolate_low_likehood(df, threshold=0.5):
 
     return df
 
-def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
+def calc_angvel_earsonly(df, rightear="rightear", leftear="leftear"):
+    """
+    Calculate angular velocity using relative ear positions (legacy version).
     
+    Uses the vector from left ear to right ear as the head direction.
+    Kept for backward compatibility.
+    """
     return (
         df
         .assign(
@@ -130,6 +135,77 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
             d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
         )
         .drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
+    )
+
+def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base="head_base"):
+    """
+    Calculate angular velocity using head_base as reference point.
+    
+    Uses the vector from head_base to the midpoint between the two ears as the head direction.
+    This provides a more stable estimate of head orientation based on the overall head position.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns for rightear, leftear, and head_base positions (x and y)
+    rightear : str, default "rightear"
+        Name of the right ear bodypart
+    leftear : str, default "leftear"
+        Name of the left ear bodypart
+    head_base : str, default "head_base"
+        Name of the head base (center of head) bodypart
+    
+    Returns
+    -------
+    pd.DataFrame
+        Original dataframe with added columns:
+        - ear_distance: distance between the two ears
+        - ear_midpoint_x, ear_midpoint_y: midpoint between ears
+        - rel_head_x, rel_head_y: head direction vector (from head_base to ear midpoint)
+        - angle_rad: head angle in radians
+        - d_angle_deg: frame-to-frame angular velocity in degrees
+    """
+    return (
+        df
+        .assign(
+            # Calculate midpoint between the two ears
+            ear_midpoint_x = lambda x_df: (x_df[f"{rightear}_x"] + x_df[f"{leftear}_x"]) / 2,
+            ear_midpoint_y = lambda x_df: (x_df[f"{rightear}_y"] + x_df[f"{leftear}_y"]) / 2
+        )
+        .assign(
+            # Calculate distance between ears (for data quality check)
+            ear_distance = lambda x_df: np.sqrt(
+                (x_df[f"{rightear}_x"] - x_df[f"{leftear}_x"])**2 + 
+                (x_df[f"{rightear}_y"] - x_df[f"{leftear}_y"])**2
+            )
+        )
+        .assign(
+            # Vector from head_base to ear midpoint (head direction)
+            _rel_head_x_orig = lambda x_df: x_df.ear_midpoint_x - x_df[f"{head_base}_x"],
+            _rel_head_y_orig = lambda x_df: x_df.ear_midpoint_y - x_df[f"{head_base}_y"]
+        )
+        .assign(
+            # Filter out unlikely values (e.g., ear distance too large)
+            rel_head_x = lambda x_df: np.where(x_df.ear_distance >= 90, np.nan, x_df._rel_head_x_orig),
+            rel_head_y = lambda x_df: np.where(x_df.ear_distance >= 90, np.nan, x_df._rel_head_y_orig)
+        )
+        .assign(
+            # Calculate angle from head_base to ear midpoint
+            angle_rad = lambda x_df: np.arctan2(x_df.rel_head_y, x_df.rel_head_x)
+        )
+        .assign(
+            # Calculate frame-to-frame angle changes
+            _d_angle_raw = lambda x_df: x_df.angle_rad.diff()
+        )
+        .assign(
+            d_angle = lambda x_df: x_df._d_angle_raw.fillna(0),
+            d_angle_wrapped = lambda x_df: (x_df._d_angle_raw + np.pi) % (2 * np.pi) - np.pi
+        )
+        .assign(
+            # Convert to degrees
+            d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
+        )
+        .drop(columns=['_rel_head_x_orig', '_rel_head_y_orig', '_d_angle_raw'], errors='ignore')
     )
     
 def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
