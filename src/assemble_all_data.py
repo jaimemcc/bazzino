@@ -111,9 +111,9 @@ PARAMS = {
     # Set these to True to load from cached pickle instead of re-extracting.
     # Cache files are saved automatically after each step.
     # If the cache file doesn't exist, the step runs from scratch regardless.
-    "cache_behav": False,          # Skip DLC extraction, load from cache
+    "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
@@ -472,7 +472,7 @@ def cluster_photometry(snips_photo, x_array, params):
                 n_clusters=k,
                 affinity=params["clustering_affinity"],
                 assign_labels=params["clustering_assign_labels"],
-                random_state=0,
+                random_state=123,
             )
             m.fit(transformed[:, :num_pcs])
             sil_scores[idx] = silhouette_score(
@@ -491,7 +491,7 @@ def cluster_photometry(snips_photo, x_array, params):
         n_clusters=n_clusters,
         affinity=params["clustering_affinity"],
         assign_labels=params["clustering_assign_labels"],
-        random_state=0,
+        random_state=123,
     )
     model.fit(transformed[:, :num_pcs])
     sil = silhouette_score(transformed[:, :num_pcs], model.labels_, metric="cosine")
@@ -844,32 +844,22 @@ def run_pipeline(params=None):
         x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
 
     # Step 6: Sigmoidal transitions
-    # NEW: Always load from sigmoidal_fits.pickle (the authoritative source)
-    sigmoidal_fits_path = data_folder / "sigmoidal_fits.pickle"
-    if sigmoidal_fits_path.exists():
-        print(f"\n  Loading transitions from sigmoidal_fits.pickle (authoritative source)")
-        with open(sigmoidal_fits_path, "rb") as f:
-            fits_data = dill.load(f)
-        fits_df = fits_data.get("fits_df_cluster_raw")
-        if fits_df is not None:
-            print(f"  Loaded {len(fits_df)} transition fits from sigmoidal_fits.pickle")
-        else:
-            print(f"  WARNING: fits_df_cluster_raw not found, calculating from scratch")
-            fits_df = find_sigmoidal_transitions(x_combined, params)
+    # Uses deterministic clustering (random_state=0) to generate consistent results
+    print("\nSTEP 6: Calculate sigmoidal transitions")
+    print("=" * 60)
+    transitions_cache_path = data_folder / params["cache_transitions_file"]
+    if params["cache_transitions"]:
+        cached = _load_cache(transitions_cache_path, "transitions")
     else:
-        # Fallback: use cache or calculate
-        transitions_cache_path = data_folder / params["cache_transitions_file"]
-        if params["cache_transitions"]:
-            cached = _load_cache(transitions_cache_path, "transitions")
-        else:
-            cached = None
-        if cached is not None:
-            fits_df = cached["fits_df"]
-            print(f"  Transitions from cache: {len(fits_df)} fits")
-        else:
-            print(f"  WARNING: sigmoidal_fits.pickle not found, calculating transitions")
-            fits_df = find_sigmoidal_transitions(x_combined, params)
-            _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
+        cached = None
+    if cached is not None:
+        fits_df = cached["fits_df"]
+        print(f"  Transitions from cache: {len(fits_df)} fits")
+    else:
+        print(f"  Calculating transitions from deterministic clustering (random_state=0)")
+        fits_df = find_sigmoidal_transitions(x_combined, params)
+        print(f"  Calculated {len(fits_df)} transition fits")
+        _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
