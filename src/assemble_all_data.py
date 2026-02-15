@@ -61,14 +61,14 @@ PARAMS = {
     "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
 
     # ── Behavioural metric ──
-    # Options: "movement" or "angular_velocity"
-    "behav_metric": "movement",
+    # NOTE: Both movement and angular_velocity are now always calculated
+    "behav_metric": "movement",  # Deprecated - kept for reference only
 
     # ── DLC parameters ──
     "dlc_likelihood_threshold": 0.6,
     "dlc_bodyparts": ["r_ear", "l_ear", "head_base"],  # Ears + head_base (matches old pipeline exactly)
     "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
-    "dlc_smooth_window": 10,
+    "dlc_smooth_window": 5,
     "dlc_zscore_to_baseline": False,
 
     # ── Photometry parameters ──
@@ -99,6 +99,9 @@ PARAMS = {
     "calculate_raw_movement": True,         # Optional: also analyze raw pixels
     "movement_threshold_raw": 0.5,           # Threshold for raw pixel movement (pixels/frame)
 
+    # ── Angular velocity analysis parameters ──
+    "angvel_threshold": 1.0,                 # Threshold for angular velocity (deg/frame)
+
     # ── Sigmoidal transition fit ──
     "transition_condition": "deplete",
     "transition_infusion": "45NaCl",
@@ -111,9 +114,9 @@ PARAMS = {
     # Set these to True to load from cached pickle instead of re-extracting.
     # Cache files are saved automatically after each step.
     # If the cache file doesn't exist, the step runs from scratch regardless.
-    "cache_behav": True,          # Skip DLC extraction, load from cache
+    "cache_behav": False,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
@@ -205,7 +208,7 @@ def get_angular_velocity_vector(stub, dlc_folder, params):
     """Get angular velocity from DLC data for a single session."""
     df = read_DLC_csv(stub, dlc_folder)
     df = interpolate_low_likehood(df, threshold=params["dlc_likelihood_threshold"])
-    df = calc_angular_velocity(df, rightear="r_ear", leftear="l_ear")
+    df = calc_angular_velocity(df, rightear="r_ear", leftear="l_ear", absolute=True)
     return df.d_angle_deg
 
 
@@ -303,9 +306,9 @@ def assemble_photometry(params):
 
 
 def assemble_behaviour(params):
-    """Step 1: Assemble behavioural (DLC) snips and x_array."""
+    """Step 1: Assemble behavioural (DLC) snips and x_array. Always calculates both movement and angular velocity."""
     print("\n" + "=" * 60)
-    print(f"STEP 1: Assembling behavioural data ({params['behav_metric']})")
+    print("STEP 1: Assembling behavioural data (movement + angular velocity)")
     print("=" * 60)
 
     data_folder = params["data_folder"]
@@ -316,38 +319,48 @@ def assemble_behaviour(params):
         pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
     ])
 
-    snips_list, snips_list_raw, x_list = [], [], []
+    snips_movement_list, snips_angvel_list, snips_movement_raw_list, x_list = [], [], [], []
     for _, row in meta_df.iterrows():
         stub = row["Folder"]
         print(f"  Behaviour: {stub}", end=" ... ")
         try:
-            behav_vec_result = get_behav_vector(stub, dlc_folder, params)
-            
-            # Handle case where get_behav_vector returns tuple (norm, raw) or single vector
-            if isinstance(behav_vec_result, tuple):
-                behav_vec, behav_vec_raw = behav_vec_result
+            # Get movement data
+            movement_result = get_movement_vector(stub, dlc_folder, params)
+            if isinstance(movement_result, tuple):
+                movement_vec, movement_vec_raw = movement_result
             else:
-                behav_vec = behav_vec_result
-                behav_vec_raw = None
+                movement_vec = movement_result
+                movement_vec_raw = None
             
+            # Get angular velocity data
+            angvel_vec = get_angular_velocity_vector(stub, dlc_folder, params)
+            
+            # Create snips from both
             solenoid_ts = get_ttls(stub, data_folder)
-            s = get_behav_snips(
+            snips_movement = get_behav_snips(
                 solenoid_ts=solenoid_ts,
-                behav_vector=behav_vec,
+                behav_vector=movement_vec,
                 zscore_to_baseline=params["dlc_zscore_to_baseline"],
             )
-            n = len(s)
+            snips_angvel = get_behav_snips(
+                solenoid_ts=solenoid_ts,
+                behav_vector=angvel_vec,
+                zscore_to_baseline=False,  # Don't zscore angular velocity
+            )
+            
+            n = len(snips_movement)
             print(f"{n} trials")
-            snips_list.append(s)
+            snips_movement_list.append(snips_movement)
+            snips_angvel_list.append(snips_angvel)
             
             # Also create snips for raw movement if available
-            if behav_vec_raw is not None:
-                s_raw = get_behav_snips(
+            if movement_vec_raw is not None:
+                snips_movement_raw = get_behav_snips(
                     solenoid_ts=solenoid_ts,
-                    behav_vector=behav_vec_raw,
+                    behav_vector=movement_vec_raw,
                     zscore_to_baseline=False,  # Don't zscore raw pixels
                 )
-                snips_list_raw.append(s_raw)
+                snips_movement_raw_list.append(snips_movement_raw)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
             x_list.append(pd.DataFrame({
@@ -359,8 +372,9 @@ def assemble_behaviour(params):
         except Exception as e:
             print(f"ERROR: {e}")
 
-    snips_all = np.concatenate(snips_list)
-    snips_all_raw = np.concatenate(snips_list_raw) if snips_list_raw else None
+    snips_movement_all = np.concatenate(snips_movement_list)
+    snips_angvel_all = np.concatenate(snips_angvel_list)
+    snips_movement_raw_all = np.concatenate(snips_movement_raw_list) if snips_movement_raw_list else None
     x_all = (
         pd.concat(x_list, ignore_index=True)
         .replace({"condition": _condition_map()})
@@ -379,22 +393,25 @@ def assemble_behaviour(params):
 
     # Filter conditions
     mask = ~x_all.condition.isin(params["conditions_to_exclude"])
-    snips_all = snips_all[mask.values]
-    if snips_all_raw is not None:
-        snips_all_raw = snips_all_raw[mask.values]
+    snips_movement_all = snips_movement_all[mask.values]
+    snips_angvel_all = snips_angvel_all[mask.values]
+    if snips_movement_raw_all is not None:
+        snips_movement_raw_all = snips_movement_raw_all[mask.values]
     x_all = x_all[mask].reset_index(drop=True)
 
-    print(f"  Behaviour assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
-    if snips_all_raw is not None:
+    print(f"  Behaviour assembled: {snips_movement_all.shape[0]} trials, {snips_movement_all.shape[1]} bins")
+    print(f"    Movement snips: {snips_movement_all.shape}")
+    print(f"    Angular velocity snips: {snips_angvel_all.shape}")
+    if snips_movement_raw_all is not None:
         print(f"  Raw movement snips also assembled")
-    return snips_all, snips_all_raw, x_all
+    return snips_movement_all, snips_angvel_all, snips_movement_raw_all, x_all
 
 
 # ──────────────────────────────────────────────────────────────────────
 # STEP 3: Equalize and combine
 # ──────────────────────────────────────────────────────────────────────
 
-def equalize_datasets(x_photo, snips_photo, x_behav, snips_behav, snips_behav_raw=None):
+def equalize_datasets(x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw=None):
     """
     Step 3: Make sure photometry and behaviour datasets match row-for-row.
     Finds common rows based on (trial, id, condition, infusiontype) and
@@ -410,7 +427,7 @@ def equalize_datasets(x_photo, snips_photo, x_behav, snips_behav, snips_behav_ra
 
     if df_p.equals(df_b):
         print("  Datasets already aligned.")
-        return x_photo, snips_photo, x_behav, snips_behav, snips_behav_raw
+        return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
 
     # Find common rows via inner merge
     merged = pd.merge(df_p.assign(_idx_p=df_p.index),
@@ -423,14 +440,15 @@ def equalize_datasets(x_photo, snips_photo, x_behav, snips_behav, snips_behav_ra
     x_photo = x_photo.iloc[idx_p].reset_index(drop=True)
     snips_photo = snips_photo[idx_p]
     x_behav = x_behav.iloc[idx_b].reset_index(drop=True)
-    snips_behav = snips_behav[idx_b]
+    snips_movement = snips_movement[idx_b]
+    snips_angvel = snips_angvel[idx_b]
 
-    if snips_behav_raw is not None:
-        snips_behav_raw = snips_behav_raw[idx_b]
+    if snips_movement_raw is not None:
+        snips_movement_raw = snips_movement_raw[idx_b]
 
     print(f"  After equalization: {len(x_photo)} trials (photo), {len(x_behav)} trials (behav)")
     assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
-    return x_photo, snips_photo, x_behav, snips_behav, snips_behav_raw
+    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -697,7 +715,17 @@ def get_time_moving(snips, threshold=0.02, start_bin=50, end_bin=150):
     return np.array(moving)
 
 
-def combine_and_realign(x_photo, snips_photo, snips_behav, fits_df, params, snips_behav_raw=None):
+def get_time_above_angvel_threshold(snips, threshold=1.0, start_bin=50, end_bin=150):
+    """Calculate proportion of bins above angular velocity threshold per trial."""
+    angvel_above = []
+    for i in range(snips.shape[0]):
+        snip = snips[i, start_bin:end_bin]
+        tmp = len([x for x in snip if x > threshold]) / len(snip)
+        angvel_above.append(tmp)
+    return np.array(angvel_above)
+
+
+def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
     """
@@ -706,27 +734,36 @@ def combine_and_realign(x_photo, snips_photo, snips_behav, fits_df, params, snip
     print("=" * 60)
 
     # Smooth velocity snips
-    snips_vel_smooth = smooth_array(snips_behav, window_size=params["vel_smooth_window"])
+    snips_movement_smooth = smooth_array(snips_movement, window_size=params["vel_smooth_window"])
+    snips_angvel_smooth = smooth_array(snips_angvel, window_size=params["vel_smooth_window"])
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
     auc_snips = np.array([np.trapz(snips_photo[i, s:e]) for i in range(len(snips_photo))])
-    auc_vel = np.array([np.trapz(snips_vel_smooth[i, s:e]) for i in range(len(snips_vel_smooth))])
+    auc_movement = np.array([np.trapz(snips_movement_smooth[i, s:e]) for i in range(len(snips_movement_smooth))])
+    auc_angvel = np.array([np.trapz(snips_angvel_smooth[i, s:e]) for i in range(len(snips_angvel_smooth))])
 
     # Calculate time moving (normalized)
-    time_moving = get_time_moving(snips_behav, threshold=params["movement_threshold"],
+    time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
                                    start_bin=s, end_bin=e)
 
     # Calculate time moving raw (if available)
     time_moving_raw = None
-    if snips_behav_raw is not None:
-        time_moving_raw = get_time_moving(snips_behav_raw, threshold=params["movement_threshold_raw"],
+    if snips_movement_raw is not None:
+        time_moving_raw = get_time_moving(snips_movement_raw, threshold=params["movement_threshold_raw"],
                                           start_bin=s, end_bin=e)
+
+    # Calculate proportion of time above angular velocity threshold
+    time_above_angvel_threshold = get_time_above_angvel_threshold(
+        snips_angvel, threshold=params["angvel_threshold"],
+        start_bin=s, end_bin=e)
 
     x_combined = x_photo.assign(
         auc_snips=auc_snips,
-        auc_vel=auc_vel,
+        auc_movement=auc_movement,
+        auc_angvel=auc_angvel,
         time_moving=time_moving,
+        time_above_angvel_threshold=time_above_angvel_threshold,
     )
     
     # Add time_moving_raw if available
@@ -778,9 +815,9 @@ def run_pipeline(params=None):
     print("=" * 60)
     print("BAZZINO DATA ASSEMBLY PIPELINE")
     print("=" * 60)
-    print(f"  Behaviour metric: {params['behav_metric']}")
     print(f"  DLC folder: {params['dlc_folder']}")
     print(f"  Tank folder: {params['tank_folder']}")
+    print(f"  Calculating: movement + angular velocity (both always calculated)")
     print(f"  Caching: behav={params['cache_behav']}, photo={params['cache_photo']}, "
           f"clustering={params['cache_clustering']}, transitions={params['cache_transitions']}")
 
@@ -793,15 +830,16 @@ def run_pipeline(params=None):
     else:
         cached = None
     if cached is not None:
-        snips_behav = cached["snips_behav"]
-        snips_behav_raw = cached.get("snips_behav_raw", None)
+        snips_movement = cached["snips_movement"]
+        snips_angvel = cached["snips_angvel"]
+        snips_movement_raw = cached.get("snips_movement_raw", None)
         x_behav = cached["x_behav"]
-        print(f"  Behaviour from cache: {snips_behav.shape[0]} trials")
+        print(f"  Behaviour from cache: {snips_movement.shape[0]} trials (movement + angvel)")
     else:
-        snips_behav, snips_behav_raw, x_behav = assemble_behaviour(params)
-        cache_dict = {"snips_behav": snips_behav, "x_behav": x_behav}
-        if snips_behav_raw is not None:
-            cache_dict["snips_behav_raw"] = snips_behav_raw
+        snips_movement, snips_angvel, snips_movement_raw, x_behav = assemble_behaviour(params)
+        cache_dict = {"snips_movement": snips_movement, "snips_angvel": snips_angvel, "x_behav": x_behav}
+        if snips_movement_raw is not None:
+            cache_dict["snips_movement_raw"] = snips_movement_raw
         _save_cache(cache_dict, behav_cache_path, "behaviour", params)
 
     # Step 2: Photometry
@@ -819,8 +857,8 @@ def run_pipeline(params=None):
                     photo_cache_path, "photometry", params)
 
     # Step 3: Equalize
-    x_photo, snips_photo, x_behav, snips_behav, snips_behav_raw = equalize_datasets(
-        x_photo, snips_photo, x_behav, snips_behav, snips_behav_raw
+    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw = equalize_datasets(
+        x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
     )
 
     # Step 4: Clustering
@@ -863,7 +901,7 @@ def run_pipeline(params=None):
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
-        x_combined, snips_photo, snips_behav, fits_df, params, snips_behav_raw
+        x_combined, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw
     )
 
     # Create metadata about data processing
@@ -876,19 +914,22 @@ def run_pipeline(params=None):
         "dlc_likelihood_threshold": params.get("dlc_likelihood_threshold", 0.6),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
-        "behav_metric": params["behav_metric"],
+        "behav_metrics": "movement + angular_velocity (both always calculated)",
         # Movement analysis parameters
         "normalize_movement": params.get("normalize_movement", True),
         "movement_threshold": params.get("movement_threshold", 0.02),
         "calculate_raw_movement": params.get("calculate_raw_movement", False),
         "movement_threshold_raw": params.get("movement_threshold_raw", 0.5) if params.get("calculate_raw_movement", False) else None,
+        # Angular velocity parameters
+        "angvel_threshold": params.get("angvel_threshold", 1.0),
     }
 
     # Save output
     output = {
         "x_array": x_combined,
         "snips_photo": snips_photo,
-        "snips_behav": snips_behav,
+        "snips_movement": snips_movement,
+        "snips_angvel": snips_angvel,
         "pca_transformed": pca_transformed,
         "fits_df": fits_df,
         "z_dep45": z_dep45,
@@ -897,8 +938,8 @@ def run_pipeline(params=None):
     }
     
     # Add optional raw movement data
-    if snips_behav_raw is not None:
-        output["snips_behav_raw"] = snips_behav_raw
+    if snips_movement_raw is not None:
+        output["snips_movement_raw"] = snips_movement_raw
 
     output_path = params["data_folder"] / params["output_filename"]
     with open(output_path, "wb") as f:
@@ -907,13 +948,14 @@ def run_pipeline(params=None):
     print("\n" + "=" * 60)
     print(f"DONE! Saved to {output_path}")
     print("=" * 60)
-    print(f"  x_array shape:     {x_combined.shape}")
-    print(f"  snips_photo shape: {snips_photo.shape}")
-    print(f"  snips_behav shape: {snips_behav.shape}")
+    print(f"  x_array shape:          {x_combined.shape}")
+    print(f"  snips_photo shape:      {snips_photo.shape}")
+    print(f"  snips_movement shape:   {snips_movement.shape}")
+    print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"\nData processing metadata:")
-    print(f"  Behaviour metric:    {metadata['behav_metric']}")
+    print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
     print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
     print(f"  Behaviour z-scored:  {metadata['behav_zscored']}")
     print(f"  Photometry smoothed: {metadata['photo_smoothed']}")

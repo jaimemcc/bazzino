@@ -101,15 +101,65 @@ def interpolate_low_likehood(df, threshold=0.5):
 
     return df
 
-def calc_angvel_earsonly(df, rightear="rightear", leftear="leftear"):
+def calc_angvel_earsonly(df, rightear="rightear", leftear="leftear", 
+                        smooth=True, smooth_sigma=2.0, absolute=True):
     """
     Calculate angular velocity using relative ear positions (legacy version).
     
     Uses the vector from left ear to right ear as the head direction.
-    Kept for backward compatibility.
+    Kept for backward compatibility. Can optionally smooth position data before calculation.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns for rightear and leftear positions (x and y)
+    rightear : str, default "rightear"
+        Name of the right ear bodypart
+    leftear : str, default "leftear"
+        Name of the left ear bodypart
+    smooth : bool, default True
+        If True, smooth position data before calculating angles using Gaussian filter.
+    smooth_sigma : float, default 2.0
+        Standard deviation for Gaussian smoothing. Only used if smooth=True.
+    absolute : bool, default True
+        If True, return absolute value of angular velocity (magnitude only).
+    
+    Returns
+    -------
+    pd.DataFrame
+        Original dataframe with added columns including d_angle_deg (absolute if absolute=True)
     """
-    return (
-        df
+    # Make a copy to avoid modifying the input
+    df_work = df.copy()
+    
+    # Apply smoothing to position data if requested
+    if smooth:
+        bodyparts_to_smooth = [rightear, leftear]
+        
+        for bp in bodyparts_to_smooth:
+            x_col = f"{bp}_x"
+            y_col = f"{bp}_y"
+            
+            if x_col in df_work.columns and y_col in df_work.columns:
+                x_vals = pd.to_numeric(df_work[x_col], errors='coerce')
+                y_vals = pd.to_numeric(df_work[y_col], errors='coerce')
+                
+                if x_vals.notna().any():
+                    x_mask = x_vals.notna()
+                    y_mask = y_vals.notna()
+                    
+                    x_smooth = x_vals.copy()
+                    y_smooth = y_vals.copy()
+                    
+                    x_smooth[x_mask] = gaussian_filter1d(x_vals[x_mask], sigma=smooth_sigma)
+                    y_smooth[y_mask] = gaussian_filter1d(y_vals[y_mask], sigma=smooth_sigma)
+                    
+                    df_work[x_col] = x_smooth
+                    df_work[y_col] = y_smooth
+    
+    # Calculate angular velocity
+    result = (
+        df_work
         .assign(
             _rel_rightear_x_orig = lambda x_df: x_df[f"{rightear}_x"] - x_df[f"{leftear}_x"],
             _rel_rightear_y_orig = lambda x_df: x_df[f"{rightear}_y"] - x_df[f"{leftear}_y"]
@@ -134,15 +184,24 @@ def calc_angvel_earsonly(df, rightear="rightear", leftear="leftear"):
         .assign(
             d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
         )
-        .drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
     )
+    
+    # Apply absolute value if requested
+    if absolute:
+        result = result.assign(
+            d_angle_deg = lambda x_df: np.abs(x_df['d_angle_deg'])
+        )
+    
+    return result.drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
 
-def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base="head_base"):
+def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base="head_base",
+                         smooth=True, smooth_sigma=2.0, absolute=True):
     """
     Calculate angular velocity using head_base as reference point.
     
     Uses the vector from head_base to the midpoint between the two ears as the head direction.
     This provides a more stable estimate of head orientation based on the overall head position.
+    Can optionally smooth position data before calculation to reduce jitter.
     
     Parameters
     ----------
@@ -154,6 +213,15 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base=
         Name of the left ear bodypart
     head_base : str, default "head_base"
         Name of the head base (center of head) bodypart
+    smooth : bool, default True
+        If True, smooth position data before calculating angles using Gaussian filter.
+        Smoothing reduces DLC jitter and leads to cleaner angular velocity signals.
+    smooth_sigma : float, default 2.0
+        Standard deviation for Gaussian smoothing. Only used if smooth=True.
+        Higher values = more smoothing. Typical range: 0.5-3.0
+    absolute : bool, default True
+        If True, return absolute value of angular velocity (magnitude only).
+        If False, return signed angular velocity (preserves direction).
     
     Returns
     -------
@@ -163,10 +231,41 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base=
         - ear_midpoint_x, ear_midpoint_y: midpoint between ears
         - rel_head_x, rel_head_y: head direction vector (from head_base to ear midpoint)
         - angle_rad: head angle in radians
-        - d_angle_deg: frame-to-frame angular velocity in degrees
+        - d_angle_deg: frame-to-frame angular velocity in degrees (absolute if absolute=True)
     """
-    return (
-        df
+    # Make a copy to avoid modifying the input
+    df_work = df.copy()
+    
+    # Apply smoothing to position data if requested
+    if smooth:
+        bodyparts_to_smooth = [rightear, leftear, head_base]
+        
+        for bp in bodyparts_to_smooth:
+            x_col = f"{bp}_x"
+            y_col = f"{bp}_y"
+            
+            if x_col in df_work.columns and y_col in df_work.columns:
+                x_vals = pd.to_numeric(df_work[x_col], errors='coerce')
+                y_vals = pd.to_numeric(df_work[y_col], errors='coerce')
+                
+                # Only smooth non-NaN values
+                if x_vals.notna().any():
+                    x_mask = x_vals.notna()
+                    y_mask = y_vals.notna()
+                    
+                    # Apply Gaussian filter only to valid values
+                    x_smooth = x_vals.copy()
+                    y_smooth = y_vals.copy()
+                    
+                    x_smooth[x_mask] = gaussian_filter1d(x_vals[x_mask], sigma=smooth_sigma)
+                    y_smooth[y_mask] = gaussian_filter1d(y_vals[y_mask], sigma=smooth_sigma)
+                    
+                    df_work[x_col] = x_smooth
+                    df_work[y_col] = y_smooth
+    
+    # Calculate angular velocity
+    result = (
+        df_work
         .assign(
             # Calculate midpoint between the two ears
             ear_midpoint_x = lambda x_df: (x_df[f"{rightear}_x"] + x_df[f"{leftear}_x"]) / 2,
@@ -205,8 +304,15 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base=
             # Convert to degrees
             d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
         )
-        .drop(columns=['_rel_head_x_orig', '_rel_head_y_orig', '_d_angle_raw'], errors='ignore')
     )
+    
+    # Apply absolute value if requested
+    if absolute:
+        result = result.assign(
+            d_angle_deg = lambda x_df: np.abs(x_df['d_angle_deg'])
+        )
+    
+    return result.drop(columns=['_rel_head_x_orig', '_rel_head_y_orig', '_d_angle_raw'], errors='ignore')
     
 def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
                           include_bodyparts=None, exclude_bodyparts=None, normalize=True):
