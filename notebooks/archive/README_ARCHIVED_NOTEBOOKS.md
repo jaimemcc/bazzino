@@ -34,6 +34,13 @@ Exploratory clustering and analysis notebooks representing alternative methods t
 - **figs_for_transitions.ipynb** - Creates figures showing sigmoidal transition fits and dynamics in behavioral state changes
 - **Status:** These notebooks generate figures used in publication and presentations; kept for reproducibility and figure regeneration if needed
 
+### Data Preparation and Troubleshooting Notebooks
+- **equalize_photometry_and_dlc_data.ipynb** - Utility notebook for aligning and equalizing photometry and DeepLabCut data timestamps and sampling rates
+- **prep_data_for_frejus.ipynb** - Data preparation and filtering pipeline specifically for the Frejus meeting presentation figures
+- **troubleshoot_fits_comparison.ipynb** - Diagnostic notebook for comparing different sigmoid fit implementations and validating fit quality
+- **troubleshoot_realignment_comparison.ipynb** - Debugging and comparison of data realignment approaches to verify alignment accuracy
+- **Status:** These are utility, diagnostic, and one-off data preparation notebooks; archived to keep main notebooks folder clean
+
 ## Notes for Future Work
 
 1. **Data Assembly Pipeline**: If you need to understand how data was originally assembled, or if you want to revert to an earlier approach, check assemble_data.ipynb and assemble_dlc_data.ipynb
