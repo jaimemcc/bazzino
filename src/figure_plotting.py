@@ -255,8 +255,9 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
     ax.set_ylim(ylims)
     
     # Time scale bar (5 seconds at bottom-right)
-    ax.plot([15, 20], [ylims[0], ylims[0]], color="black", lw=2, alpha=0.5, clip_on=False)
-    ax.text(17.5, ylims[0]-0.3, "5 s", ha="center", va="top", fontsize=10)
+    bar_y = ylims[0] + (ylims[1] - ylims[0]) * 0.05  # 5% above bottom of plot
+    ax.plot([15, 20], [bar_y, bar_y], color="black", lw=2, alpha=0.5, clip_on=False)
+    ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
     
     # Value scale bar (only for deplete, typically)
     if scalebar:
