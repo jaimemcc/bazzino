@@ -25,6 +25,15 @@ Exploratory clustering and analysis notebooks representing alternative methods t
 - **add_sex_to_xarrays.ipynb** - Sex data integration (analysis direction changed)
 - **Status:** Sex-based analysis variations; current pipeline uses aggregated analysis
 
+### Figure Generation Notebooks (Publication Figures)
+- **figs_for_ang_vel.ipynb** - Generates figure panels showing angular velocity analysis and smoothed velocity heatmaps across different conditions
+- **figs_for_behav_dopamine.ipynb** - Creates correlation plots between dopamine photometry and behavioral/velocity metrics (AUC analysis)
+- **figs_for_cluster_analysis.ipynb** - Produces comprehensive cluster analysis visualizations including cluster contingency tables and response classification plots
+- **figs_for_frejus.ipynb** - Figure preparation for the 2025 Frejus meeting presentation; generates publication-quality figures for the conference talk
+- **figs_for_photometry.ipynb** - Generates heatmap and overview figures for photometry data across experimental conditions
+- **figs_for_transitions.ipynb** - Creates figures showing sigmoidal transition fits and dynamics in behavioral state changes
+- **Status:** These notebooks generate figures used in publication and presentations; kept for reproducibility and figure regeneration if needed
+
 ## Notes for Future Work
 
 1. **Data Assembly Pipeline**: If you need to understand how data was originally assembled, or if you want to revert to an earlier approach, check assemble_data.ipynb and assemble_dlc_data.ipynb
