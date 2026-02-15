@@ -66,9 +66,9 @@ PARAMS = {
 
     # ── DLC parameters ──
     "dlc_likelihood_threshold": 0.6,
-    "dlc_bodyparts": ["r_ear", "l_ear", "head_base"],  # None = all bodyparts; or list e.g. ["r_ear", "l_ear", "head_base"]
+    "dlc_bodyparts": ["r_ear", "l_ear", "head_base"],  # Ears + head_base (matches old pipeline exactly)
     "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
-    "dlc_smooth_window": 5,
+    "dlc_smooth_window": 10,
     "dlc_zscore_to_baseline": False,
 
     # ── Photometry parameters ──
@@ -844,17 +844,32 @@ def run_pipeline(params=None):
         x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
 
     # Step 6: Sigmoidal transitions
-    transitions_cache_path = data_folder / params["cache_transitions_file"]
-    if params["cache_transitions"]:
-        cached = _load_cache(transitions_cache_path, "transitions")
+    # NEW: Always load from sigmoidal_fits.pickle (the authoritative source)
+    sigmoidal_fits_path = data_folder / "sigmoidal_fits.pickle"
+    if sigmoidal_fits_path.exists():
+        print(f"\n  Loading transitions from sigmoidal_fits.pickle (authoritative source)")
+        with open(sigmoidal_fits_path, "rb") as f:
+            fits_data = dill.load(f)
+        fits_df = fits_data.get("fits_df_cluster_raw")
+        if fits_df is not None:
+            print(f"  Loaded {len(fits_df)} transition fits from sigmoidal_fits.pickle")
+        else:
+            print(f"  WARNING: fits_df_cluster_raw not found, calculating from scratch")
+            fits_df = find_sigmoidal_transitions(x_combined, params)
     else:
-        cached = None
-    if cached is not None:
-        fits_df = cached["fits_df"]
-        print(f"  Transitions from cache: {len(fits_df)} fits")
-    else:
-        fits_df = find_sigmoidal_transitions(x_combined, params)
-        _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
+        # Fallback: use cache or calculate
+        transitions_cache_path = data_folder / params["cache_transitions_file"]
+        if params["cache_transitions"]:
+            cached = _load_cache(transitions_cache_path, "transitions")
+        else:
+            cached = None
+        if cached is not None:
+            fits_df = cached["fits_df"]
+            print(f"  Transitions from cache: {len(fits_df)} fits")
+        else:
+            print(f"  WARNING: sigmoidal_fits.pickle not found, calculating transitions")
+            fits_df = find_sigmoidal_transitions(x_combined, params)
+            _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
