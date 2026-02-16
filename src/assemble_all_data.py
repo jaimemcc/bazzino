@@ -116,7 +116,7 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": False,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
@@ -320,6 +320,8 @@ def assemble_behaviour(params):
     ])
 
     snips_movement_list, snips_angvel_list, snips_movement_raw_list, x_list = [], [], [], []
+    behav_stats = {}  # Store mean/std for each file's behavior vectors
+    
     for _, row in meta_df.iterrows():
         stub = row["Folder"]
         print(f"  Behaviour: {stub}", end=" ... ")
@@ -334,6 +336,28 @@ def assemble_behaviour(params):
             
             # Get angular velocity data
             angvel_vec = get_angular_velocity_vector(stub, dlc_folder, params)
+            
+            # Calculate mean and std for behavior vectors, excluding first and last 1800 frames
+            exclude_frames = 1800
+            valid_range = slice(exclude_frames, -exclude_frames if exclude_frames > 0 else None)
+            
+            movement_mean = np.nanmean(movement_vec[valid_range])
+            movement_std = np.nanstd(movement_vec[valid_range])
+            angvel_mean = np.nanmean(angvel_vec[valid_range])
+            angvel_std = np.nanstd(angvel_vec[valid_range])
+            
+            # Store with file identifier (for reference/metadata)
+            file_id = f"{row['Subject']}_{stub}"
+            behav_stats[file_id] = {
+                "subject": row["Subject"],
+                "folder": stub,
+                "treatment": row["TreatNum"],
+                "condition": row["Physiological state"],
+                "movement_mean": movement_mean,
+                "movement_std": movement_std,
+                "angvel_mean": angvel_mean,
+                "angvel_std": angvel_std,
+            }
             
             # Create snips from both
             solenoid_ts = get_ttls(stub, data_folder)
@@ -368,6 +392,10 @@ def assemble_behaviour(params):
                 "id": row["Subject"],
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
+                "movement_mean": movement_mean,
+                "movement_std": movement_std,
+                "angvel_mean": angvel_mean,
+                "angvel_std": angvel_std,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
@@ -404,7 +432,7 @@ def assemble_behaviour(params):
     print(f"    Angular velocity snips: {snips_angvel_all.shape}")
     if snips_movement_raw_all is not None:
         print(f"  Raw movement snips also assembled")
-    return snips_movement_all, snips_angvel_all, snips_movement_raw_all, x_all
+    return snips_movement_all, snips_angvel_all, snips_movement_raw_all, x_all, behav_stats
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -834,10 +862,11 @@ def run_pipeline(params=None):
         snips_angvel = cached["snips_angvel"]
         snips_movement_raw = cached.get("snips_movement_raw", None)
         x_behav = cached["x_behav"]
+        behav_stats = cached.get("behav_stats", {})
         print(f"  Behaviour from cache: {snips_movement.shape[0]} trials (movement + angvel)")
     else:
-        snips_movement, snips_angvel, snips_movement_raw, x_behav = assemble_behaviour(params)
-        cache_dict = {"snips_movement": snips_movement, "snips_angvel": snips_angvel, "x_behav": x_behav}
+        snips_movement, snips_angvel, snips_movement_raw, x_behav, behav_stats = assemble_behaviour(params)
+        cache_dict = {"snips_movement": snips_movement, "snips_angvel": snips_angvel, "x_behav": x_behav, "behav_stats": behav_stats}
         if snips_movement_raw is not None:
             cache_dict["snips_movement_raw"] = snips_movement_raw
         _save_cache(cache_dict, behav_cache_path, "behaviour", params)
@@ -860,6 +889,12 @@ def run_pipeline(params=None):
     x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw = equalize_datasets(
         x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
     )
+    
+    # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
+    behav_cols = ["movement_mean", "movement_std", "angvel_mean", "angvel_std"]
+    for col in behav_cols:
+        if col in x_behav.columns:
+            x_photo[col] = x_behav[col]
 
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
@@ -935,6 +970,7 @@ def run_pipeline(params=None):
         "z_dep45": z_dep45,
         "metadata": metadata,
         "params": params,
+        "behav_stats": behav_stats,  # Mean/std for behavior vectors (movement & angvel) per file, excluding first/last 1800 frames
     }
     
     # Add optional raw movement data
