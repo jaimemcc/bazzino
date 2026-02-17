@@ -172,5 +172,6 @@ cython_debug/
 
 results/*
 paper/figs/panels/*
-*.affinity
+*.afdesign
+
 
