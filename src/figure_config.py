@@ -39,7 +39,11 @@ COLOR_MAP = {
 }
 
 # Custom diverging colormap for heatmaps: blue (negative) - white (neutral) - red (positive)
-HEATMAP_CMAP = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
+HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
+HEATMAP_CMAP_UNI = LinearSegmentedColormap.from_list(
+    "white_to_darkred", 
+    ["white", COLORS[3]]
+)
 
 # ──────────────────────────────────────────────────────────────────────
 # Paths
@@ -48,7 +52,7 @@ HEATMAP_CMAP = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1],
 # These are relative paths for use in notebooks (notebooks/ folder as working directory)
 DATAFOLDER = Path("../data")
 RESULTSFOLDER = Path("../results")
-FIGSFOLDER = Path("../paper/figs")
+FIGSFOLDER = Path("../paper/figs/panels")
 
 # Ensure figures folder exists
 FIGSFOLDER.mkdir(parents=True, exist_ok=True)
@@ -114,9 +118,9 @@ PHOTO_SMOOTH_WINDOW = 1  # Reference only — photometry is NOT smoothed
 # ──────────────────────────────────────────────────────────────────────
 
 # Set this to True to save all figures; False to display only
-SAVE_FIGS = False
+SAVE_FIGS = True
 
 # Figure file format options
 SAVE_PDF = True  # Save PDF for publication
-SAVE_PNG = True  # Save PNG for presentations
+SAVE_PNG = False  # Save PNG for presentations
 PNG_DPI = 300  # DPI for PNG export
