@@ -57,8 +57,8 @@ PARAMS = {
     "data_folder": Path("data"),
     "results_folder": Path("results"),
     "tank_folder": Path("D:/TestData/bazzino/from_paula"),
-    # "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
-    "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
+    "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
+    # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -94,8 +94,8 @@ PARAMS = {
     "clustering_assign_labels": "discretize",
 
     # ── Movement analysis parameters ──
-    "normalize_movement": True,              # Normalize to [0,1] by default
-    "movement_threshold": 0.02,              # Threshold for normalized movement
+    "normalize_movement": False,              # Normalize to [0,1] by default
+    "movement_threshold": 3,              # Threshold for normalized movement
     "calculate_raw_movement": True,         # Optional: also analyze raw pixels
     "movement_threshold_raw": 0.5,           # Threshold for raw pixel movement (pixels/frame)
 
@@ -187,7 +187,8 @@ def get_movement_vector(stub, dlc_folder, params):
         include_bodyparts=params["dlc_bodyparts"],
         smooth_method=params["dlc_smooth_method"],
         smooth_window=params["dlc_smooth_window"],
-        normalize=True,
+        normalize=False,
+        calibration_factor=1.0,  # No scaling applied to movement metric
     )
     
     # Optionally also get raw pixel movement
@@ -767,9 +768,9 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    auc_snips = np.array([np.trapz(snips_photo[i, s:e]) for i in range(len(snips_photo))])
-    auc_movement = np.array([np.trapz(snips_movement_smooth[i, s:e]) for i in range(len(snips_movement_smooth))])
-    auc_angvel = np.array([np.trapz(snips_angvel_smooth[i, s:e]) for i in range(len(snips_angvel_smooth))])
+    auc_snips = np.array([np.trapezoid(snips_photo[i, s:e]) for i in range(len(snips_photo))])
+    auc_movement = np.array([np.trapezoid(snips_movement_smooth[i, s:e]) for i in range(len(snips_movement_smooth))])
+    auc_angvel = np.array([np.trapezoid(snips_angvel_smooth[i, s:e]) for i in range(len(snips_angvel_smooth))])
 
     # Calculate time moving (normalized)
     time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
