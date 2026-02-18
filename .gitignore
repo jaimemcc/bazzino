@@ -175,3 +175,6 @@ paper/figs/panels/*
 *.afdesign
 
 
+# pixi environments
+.pixi/*
+!.pixi/config.toml
