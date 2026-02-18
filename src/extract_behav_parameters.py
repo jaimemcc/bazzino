@@ -315,7 +315,8 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base=
     return result.drop(columns=['_rel_head_x_orig', '_rel_head_y_orig', '_d_angle_raw'], errors='ignore')
     
 def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
-                          include_bodyparts=None, exclude_bodyparts=None, normalize=True):
+                          include_bodyparts=None, exclude_bodyparts=None, normalize=True,
+                          calibration_factor=1):
     """
     Calculate overall bodypart movement across time.
     
@@ -420,7 +421,10 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
     
     # Aggregate: average movement across bodyparts
     if bodypart_movements:
-        total_movement = pd.concat(bodypart_movements, axis=1).mean(axis=1)
+        total_movement = (pd.concat(bodypart_movements, axis=1)
+                          .mean(axis=1)
+                          .mul(calibration_factor)
+        )
         
         # Apply smoothing if requested
         if smooth_method is not None:
