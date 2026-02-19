@@ -9,6 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+from pathlib import Path
+from scipy import stats
 
 
 def smooth_array(arr, window_size=5):
@@ -146,7 +148,7 @@ def get_auc(snips, start_bin=50, end_bin=150):
     """
     auc = []
     for snip in snips:
-        auc.append(np.trapz(snip[start_bin:end_bin]))
+        auc.append(np.trapezoid(snip[start_bin:end_bin]))
     return np.array(auc)
 
 
@@ -288,11 +290,24 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     ax.bar(barx[1] - spacer, np.mean(aucs[1][0]), color=colors[2], width=barwidth)
     ax.bar(barx[1] + spacer, np.mean(aucs[1][1]), color=colors[3], width=barwidth)
 
+    # Draw lines connecting paired values (10NaCl to 45NaCl within each condition)
+    # Replete: connect bars 0 and 1
+    for i in range(len(aucs[0][0])):
+        ax.plot([barx[0] - spacer, barx[0] + spacer], 
+                [aucs[0][0][i], aucs[0][1][i]], 
+                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
+    
+    # Deplete: connect bars 2 and 3
+    for i in range(len(aucs[1][0])):
+        ax.plot([barx[1] - spacer, barx[1] + spacer], 
+                [aucs[1][0][i], aucs[1][1][i]], 
+                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
+
     # Overlay individual points
-    ax.scatter([barx[0] - spacer]*len(aucs[0][0]), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30)
-    ax.scatter([barx[0] + spacer]*len(aucs[0][1]), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30)
-    ax.scatter([barx[1] - spacer]*len(aucs[1][0]), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30)
-    ax.scatter([barx[1] + spacer]*len(aucs[1][1]), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30)
+    ax.scatter([barx[0] - spacer]*len(aucs[0][0]), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
+    ax.scatter([barx[0] + spacer]*len(aucs[0][1]), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
+    ax.scatter([barx[1] - spacer]*len(aucs[1][0]), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
+    ax.scatter([barx[1] + spacer]*len(aucs[1][1]), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
 
     # Styling
     sns.despine(ax=ax, top=True, right=True, left=False, bottom=True)
@@ -328,6 +343,49 @@ def save_figure(fig, filename, folder, save_pdf=True, save_png=True, png_dpi=300
         fig.savefig(png_path, bbox_inches='tight', dpi=png_dpi)
 
 
+def save_figure_atomic(
+    fig,
+    filename,
+    folder,
+    save_pdf=True,
+    save_png=True,
+    png_dpi=300,
+    temp_folder=None,
+):
+    """
+    Save figure to a temporary folder, then move into place.
+
+    This avoids downstream tools reading partially written files.
+
+    :param fig: matplotlib figure object
+    :param filename: filename without extension (e.g., "fig1_heatmap_replete")
+    :param folder: Path object or string pointing to output folder
+    :param save_pdf: if True, save as PDF
+    :param save_png: if True, save as PNG
+    :param png_dpi: DPI for PNG export
+    :param temp_folder: optional temp folder (defaults to folder / "_tmp")
+    """
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    if temp_folder is None:
+        temp_folder = folder / "_tmp"
+    temp_folder = Path(temp_folder)
+    temp_folder.mkdir(parents=True, exist_ok=True)
+
+    if save_pdf:
+        temp_pdf = temp_folder / f"{filename}.pdf"
+        final_pdf = folder / f"{filename}.pdf"
+        fig.savefig(temp_pdf, bbox_inches='tight')
+        temp_pdf.replace(final_pdf)
+
+    if save_png:
+        temp_png = temp_folder / f"{filename}.png"
+        final_png = folder / f"{filename}.png"
+        fig.savefig(temp_png, bbox_inches='tight', dpi=png_dpi)
+        temp_png.replace(final_png)
+
+
 def print_auc_stats(aucs, labels, title="Summary Statistics"):
     """
     Print formatted summary statistics for AUC data.
@@ -342,3 +400,73 @@ def print_auc_stats(aucs, labels, title="Summary Statistics"):
         mean = np.mean(auc)
         sem = np.std(auc) / np.sqrt(len(auc))
         print(f"{label:30s} (n={len(auc):2d}): {mean:7.2f} ± {sem:.2f}")
+
+
+def draw_regression_line(y, ax, color):
+    """
+    Draw a linear regression line on an axis and return statistics.
+    
+    :param y: Array of y values (x values are assumed to be indices)
+    :param ax: Matplotlib axis to plot on
+    :param color: Color for the regression line
+    :return: Tuple of (r_value, p_value)
+    """
+    x = np.arange(len(y))
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    y_fit = slope * x + intercept
+    ax.plot(x, y_fit, color=color, lw=1.5)
+    
+    print(f"r = {r_value:.2f}, p = {p_value:.3f}")
+    
+    return r_value, p_value
+
+
+def make_correlation_plot(inf10, inf45, col10, col45, yaxis=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and regression line
+    :param col45: Color for 0.45M data points and regression line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :return: Figure object
+    """
+    f, ax = plt.subplots(figsize=(1.8, 1.8),
+                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+
+    ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
+    ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
+
+    r, p = draw_regression_line(inf10, ax, col10)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 1.1, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
+            va="bottom", ha="left")
+    
+    r, p = draw_regression_line(inf45, ax, col45)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0.9, 1, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+            va="bottom", ha="left")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-0.1, 1])
+  
+    if yaxis:
+        ax.set_yticks([0, 0.5, 1])
+        ax.set_ylabel("Time moving")
+    else:
+        ax.set_yticks([0, 0.5, 1], labels=["", "", ""])
+
+    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xlabel("Trial")
+
+    # ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    return f

@@ -170,11 +170,15 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-results/*
-paper/figs/panels/*
-*.afdesign
-
 
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+
+# Project specific ignores
+results/*
+paper/figs/panels/*
+paper/figs/*.afdesign
+paper/figs/bazzino_figs_v03.afdesign~lock~
+
