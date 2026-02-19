@@ -421,7 +421,7 @@ def draw_regression_line(y, ax, color):
     return r_value, p_value
 
 
-def make_correlation_plot(inf10, inf45, col10, col45, yaxis=False):
+def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
     
@@ -451,7 +451,7 @@ def make_correlation_plot(inf10, inf45, col10, col45, yaxis=False):
         p = "p<0.001"
     else:
         p = f"p={p:.3f}"
-    ax.text(0.9, 1, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+    ax.text(0, 1, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
             va="bottom", ha="left")
 
     sns.despine(ax=ax, offset=2)
@@ -468,5 +468,55 @@ def make_correlation_plot(inf10, inf45, col10, col45, yaxis=False):
     ax.set_xlabel("Trial")
 
     # ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    return f
+
+def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and regression line
+    :param col45: Color for 0.45M data points and regression line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :return: Figure object
+    """
+    f, ax = plt.subplots(figsize=(1.8, 1.8),
+                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+
+    ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
+    ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
+
+    r, p = draw_regression_line(inf10, ax, col10)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 200, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
+            va="bottom", ha="left")
+    
+    r, p = draw_regression_line(inf45, ax, col45)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 175, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+            va="bottom", ha="left")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-65, 180])
+  
+    if yaxis:
+        ax.set_yticks([-50, 0, 50, 100, 150])
+        ax.set_ylabel("Dopamine (AUC)")
+    else:
+        ax.set_yticks([-50, 0, 50, 100, 150], labels=["", "0", "", "", ""])
+
+    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
     return f
