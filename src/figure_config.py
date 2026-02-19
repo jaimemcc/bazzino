@@ -40,9 +40,13 @@ COLOR_MAP = {
 
 # Custom diverging colormap for heatmaps: blue (negative) - white (neutral) - red (positive)
 HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
-HEATMAP_CMAP_UNI = LinearSegmentedColormap.from_list(
+HEATMAP_CMAP_RED = LinearSegmentedColormap.from_list(
     "white_to_darkred", 
     ["white", COLORS[3]]
+)
+HEATMAP_CMAP_BLUE = LinearSegmentedColormap.from_list(
+    "white_to_darkblue", 
+    ["white", COLORS[1]]
 )
 
 # ──────────────────────────────────────────────────────────────────────
