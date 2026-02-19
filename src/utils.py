@@ -36,6 +36,37 @@ def get_time_moving(snips, threshold=1):
 
     return np.array(moving)
 
+
+def recalculate_time_moving(df, snips_movement, threshold=0.02, start_bin=50, end_bin=150):
+    """
+    Recalculate time_moving with a different threshold and update the dataframe.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe with trial information (must have same number of rows as snips_movement)
+    snips_movement : np.ndarray
+        Movement snips array with shape (n_trials, n_bins)
+    threshold : float, default=0.02
+        Movement threshold value (normalized movement units)
+    start_bin : int, default=50
+        Starting bin index for calculation window
+    end_bin : int, default=150
+        Ending bin index for calculation window
+        
+    Returns
+    -------
+    pd.DataFrame
+        Copy of df with updated time_moving column
+    """
+    moving = []
+    for i in range(snips_movement.shape[0]):
+        snip = snips_movement[i, start_bin:end_bin]
+        tmp = len([x for x in snip if x > threshold]) / len(snip)
+        moving.append(tmp)
+    
+    return df.assign(time_moving=np.array(moving))
+
 def scale_vlim_to_data(snips, percentile=99):
     # Get the vlim values for the heatmap based on the data distribution
     vlim = np.percentile(np.abs(snips), percentile)

@@ -171,3 +171,10 @@ cython_debug/
 .pypirc
 
 results/*
+paper/figs/panels/*
+*.afdesign
+
+
+# pixi environments
+.pixi/*
+!.pixi/config.toml

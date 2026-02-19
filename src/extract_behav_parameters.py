@@ -101,10 +101,65 @@ def interpolate_low_likehood(df, threshold=0.5):
 
     return df
 
-def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
+def calc_angvel_earsonly(df, rightear="rightear", leftear="leftear", 
+                        smooth=True, smooth_sigma=2.0, absolute=True):
+    """
+    Calculate angular velocity using relative ear positions (legacy version).
     
-    return (
-        df
+    Uses the vector from left ear to right ear as the head direction.
+    Kept for backward compatibility. Can optionally smooth position data before calculation.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns for rightear and leftear positions (x and y)
+    rightear : str, default "rightear"
+        Name of the right ear bodypart
+    leftear : str, default "leftear"
+        Name of the left ear bodypart
+    smooth : bool, default True
+        If True, smooth position data before calculating angles using Gaussian filter.
+    smooth_sigma : float, default 2.0
+        Standard deviation for Gaussian smoothing. Only used if smooth=True.
+    absolute : bool, default True
+        If True, return absolute value of angular velocity (magnitude only).
+    
+    Returns
+    -------
+    pd.DataFrame
+        Original dataframe with added columns including d_angle_deg (absolute if absolute=True)
+    """
+    # Make a copy to avoid modifying the input
+    df_work = df.copy()
+    
+    # Apply smoothing to position data if requested
+    if smooth:
+        bodyparts_to_smooth = [rightear, leftear]
+        
+        for bp in bodyparts_to_smooth:
+            x_col = f"{bp}_x"
+            y_col = f"{bp}_y"
+            
+            if x_col in df_work.columns and y_col in df_work.columns:
+                x_vals = pd.to_numeric(df_work[x_col], errors='coerce')
+                y_vals = pd.to_numeric(df_work[y_col], errors='coerce')
+                
+                if x_vals.notna().any():
+                    x_mask = x_vals.notna()
+                    y_mask = y_vals.notna()
+                    
+                    x_smooth = x_vals.copy()
+                    y_smooth = y_vals.copy()
+                    
+                    x_smooth[x_mask] = gaussian_filter1d(x_vals[x_mask], sigma=smooth_sigma)
+                    y_smooth[y_mask] = gaussian_filter1d(y_vals[y_mask], sigma=smooth_sigma)
+                    
+                    df_work[x_col] = x_smooth
+                    df_work[y_col] = y_smooth
+    
+    # Calculate angular velocity
+    result = (
+        df_work
         .assign(
             _rel_rightear_x_orig = lambda x_df: x_df[f"{rightear}_x"] - x_df[f"{leftear}_x"],
             _rel_rightear_y_orig = lambda x_df: x_df[f"{rightear}_y"] - x_df[f"{leftear}_y"]
@@ -129,17 +184,145 @@ def calc_angular_velocity(df, rightear="rightear", leftear="leftear"):
         .assign(
             d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
         )
-        .drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
     )
     
-def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
-                          include_bodyparts=None, exclude_bodyparts=None):
-    """
-    Calculate overall bodypart movement across time, normalized to [0, 1].
+    # Apply absolute value if requested
+    if absolute:
+        result = result.assign(
+            d_angle_deg = lambda x_df: np.abs(x_df['d_angle_deg'])
+        )
     
-    Computes frame-to-frame displacement for each bodypart, optionally weights
-    by z-scored movement, applies smoothing to remove jitter, and normalizes 
-    to [0, 1] range where 0 = no movement and 1 = maximum movement.
+    return result.drop(columns=['_rel_rightear_x_orig', '_rel_rightear_y_orig', '_d_angle_raw'], errors='ignore')
+
+def calc_angular_velocity(df, rightear="rightear", leftear="leftear", head_base="head_base",
+                         smooth=True, smooth_sigma=2.0, absolute=True):
+    """
+    Calculate angular velocity using head_base as reference point.
+    
+    Uses the vector from head_base to the midpoint between the two ears as the head direction.
+    This provides a more stable estimate of head orientation based on the overall head position.
+    Can optionally smooth position data before calculation to reduce jitter.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns for rightear, leftear, and head_base positions (x and y)
+    rightear : str, default "rightear"
+        Name of the right ear bodypart
+    leftear : str, default "leftear"
+        Name of the left ear bodypart
+    head_base : str, default "head_base"
+        Name of the head base (center of head) bodypart
+    smooth : bool, default True
+        If True, smooth position data before calculating angles using Gaussian filter.
+        Smoothing reduces DLC jitter and leads to cleaner angular velocity signals.
+    smooth_sigma : float, default 2.0
+        Standard deviation for Gaussian smoothing. Only used if smooth=True.
+        Higher values = more smoothing. Typical range: 0.5-3.0
+    absolute : bool, default True
+        If True, return absolute value of angular velocity (magnitude only).
+        If False, return signed angular velocity (preserves direction).
+    
+    Returns
+    -------
+    pd.DataFrame
+        Original dataframe with added columns:
+        - ear_distance: distance between the two ears
+        - ear_midpoint_x, ear_midpoint_y: midpoint between ears
+        - rel_head_x, rel_head_y: head direction vector (from head_base to ear midpoint)
+        - angle_rad: head angle in radians
+        - d_angle_deg: frame-to-frame angular velocity in degrees (absolute if absolute=True)
+    """
+    # Make a copy to avoid modifying the input
+    df_work = df.copy()
+    
+    # Apply smoothing to position data if requested
+    if smooth:
+        bodyparts_to_smooth = [rightear, leftear, head_base]
+        
+        for bp in bodyparts_to_smooth:
+            x_col = f"{bp}_x"
+            y_col = f"{bp}_y"
+            
+            if x_col in df_work.columns and y_col in df_work.columns:
+                x_vals = pd.to_numeric(df_work[x_col], errors='coerce')
+                y_vals = pd.to_numeric(df_work[y_col], errors='coerce')
+                
+                # Only smooth non-NaN values
+                if x_vals.notna().any():
+                    x_mask = x_vals.notna()
+                    y_mask = y_vals.notna()
+                    
+                    # Apply Gaussian filter only to valid values
+                    x_smooth = x_vals.copy()
+                    y_smooth = y_vals.copy()
+                    
+                    x_smooth[x_mask] = gaussian_filter1d(x_vals[x_mask], sigma=smooth_sigma)
+                    y_smooth[y_mask] = gaussian_filter1d(y_vals[y_mask], sigma=smooth_sigma)
+                    
+                    df_work[x_col] = x_smooth
+                    df_work[y_col] = y_smooth
+    
+    # Calculate angular velocity
+    result = (
+        df_work
+        .assign(
+            # Calculate midpoint between the two ears
+            ear_midpoint_x = lambda x_df: (x_df[f"{rightear}_x"] + x_df[f"{leftear}_x"]) / 2,
+            ear_midpoint_y = lambda x_df: (x_df[f"{rightear}_y"] + x_df[f"{leftear}_y"]) / 2
+        )
+        .assign(
+            # Calculate distance between ears (for data quality check)
+            ear_distance = lambda x_df: np.sqrt(
+                (x_df[f"{rightear}_x"] - x_df[f"{leftear}_x"])**2 + 
+                (x_df[f"{rightear}_y"] - x_df[f"{leftear}_y"])**2
+            )
+        )
+        .assign(
+            # Vector from head_base to ear midpoint (head direction)
+            _rel_head_x_orig = lambda x_df: x_df.ear_midpoint_x - x_df[f"{head_base}_x"],
+            _rel_head_y_orig = lambda x_df: x_df.ear_midpoint_y - x_df[f"{head_base}_y"]
+        )
+        .assign(
+            # Filter out unlikely values (e.g., ear distance too large)
+            rel_head_x = lambda x_df: np.where(x_df.ear_distance >= 90, np.nan, x_df._rel_head_x_orig),
+            rel_head_y = lambda x_df: np.where(x_df.ear_distance >= 90, np.nan, x_df._rel_head_y_orig)
+        )
+        .assign(
+            # Calculate angle from head_base to ear midpoint
+            angle_rad = lambda x_df: np.arctan2(x_df.rel_head_y, x_df.rel_head_x)
+        )
+        .assign(
+            # Calculate frame-to-frame angle changes
+            _d_angle_raw = lambda x_df: x_df.angle_rad.diff()
+        )
+        .assign(
+            d_angle = lambda x_df: x_df._d_angle_raw.fillna(0),
+            d_angle_wrapped = lambda x_df: (x_df._d_angle_raw + np.pi) % (2 * np.pi) - np.pi
+        )
+        .assign(
+            # Convert to degrees
+            d_angle_deg = lambda x_df: np.rad2deg(x_df.d_angle_wrapped)
+        )
+    )
+    
+    # Apply absolute value if requested
+    if absolute:
+        result = result.assign(
+            d_angle_deg = lambda x_df: np.abs(x_df['d_angle_deg'])
+        )
+    
+    return result.drop(columns=['_rel_head_x_orig', '_rel_head_y_orig', '_d_angle_raw'], errors='ignore')
+    
+def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smooth_window=5, 
+                          include_bodyparts=None, exclude_bodyparts=None, normalize=True,
+                          calibration_factor=1):
+    """
+    Calculate overall bodypart movement across time.
+    
+    Computes frame-to-frame displacement for each bodypart (in pixels), optionally weights
+    by z-scored movement, applies smoothing to remove jitter, and optionally normalizes 
+    to [0, 1] range.
     
     Parameters
     ----------
@@ -164,11 +347,15 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
     exclude_bodyparts : list of str, optional
         If provided, these bodyparts will be excluded from the calculation.
         Example: ['rightear']. Cannot be used together with include_bodyparts.
+    normalize : bool, default True
+        If True, normalize movement to [0, 1] range using min-max scaling.
+        If False, return raw average pixels per bodypart per frame.
     
     Returns
     -------
     pd.Series
-        Normalized movement for each frame, values in [0, 1]
+        Movement for each frame. If normalize=True (default), values are in [0, 1].
+        If normalize=False, values are in pixels (average across bodyparts).
     
     Raises
     ------
@@ -181,7 +368,7 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
       'bodypart_x' and 'bodypart_y'.
     - Likelihood columns are ignored.
     - Frame-to-frame distance is calculated as sqrt(dx^2 + dy^2).
-    - Values are averaged across bodyparts and normalized to [0, 1].
+    - Values are averaged across bodyparts.
     - With smoothing, edge frames may be affected depending on method.
     """
     if include_bodyparts is not None and exclude_bodyparts is not None:
@@ -234,7 +421,10 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
     
     # Aggregate: average movement across bodyparts
     if bodypart_movements:
-        total_movement = pd.concat(bodypart_movements, axis=1).mean(axis=1)
+        total_movement = (pd.concat(bodypart_movements, axis=1)
+                          .mean(axis=1)
+                          .mul(calibration_factor)
+        )
         
         # Apply smoothing if requested
         if smooth_method is not None:
@@ -263,20 +453,26 @@ def calc_bodypart_movement(df, weight_by_zscore=False, smooth_method=None, smoot
                 smoothed_values = savgol_filter(values, window, polyorder, mode='nearest')
                 total_movement = pd.Series(smoothed_values, index=total_movement.index)
         
-        # Normalize to [0, 1] using min-max scaling
-        min_val = total_movement.min()
-        max_val = total_movement.max()
-        
-        if max_val > min_val:
-            normalized = (total_movement - min_val) / (max_val - min_val)
+        # Normalize to [0, 1] using min-max scaling if requested
+        if normalize:
+            min_val = total_movement.min()
+            max_val = total_movement.max()
+            
+            if max_val > min_val:
+                normalized = (total_movement - min_val) / (max_val - min_val)
+            else:
+                # All values are the same, return zeros
+                normalized = pd.Series(0.0, index=total_movement.index)
+            return normalized
         else:
-            # All values are the same, return zeros
-            normalized = pd.Series(0.0, index=df.index)
+            # Return raw pixel movement
+            return total_movement
     else:
         # No valid bodyparts found
-        normalized = pd.Series(0.0, index=df.index)
-    
-    return normalized
+        if normalize:
+            return pd.Series(0.0, index=df.index)
+        else:
+            return pd.Series(0.0, index=df.index)
 
 def get_behav_snips(behav_vector,
                     solenoid_ts,
