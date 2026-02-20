@@ -453,9 +453,9 @@ def draw_regression_line(y, ax, color):
     slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
     y_fit = slope * x + intercept
     ax.plot(x, y_fit, color=color, lw=1.5)
-    
+
     print(f"r = {r_value:.2f}, p = {p_value:.3f}")
-    
+
     return r_value, p_value
 
 
@@ -465,8 +465,8 @@ def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     
     :param inf10: Array of AUC values for 0.10M infusion
     :param inf45: Array of AUC values for 0.45M infusion
-    :param col10: Color for 0.10M data points and regression line
-    :param col45: Color for 0.45M data points and regression line
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
     :return: Figure object
     """
@@ -515,8 +515,8 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     
     :param inf10: Array of AUC values for 0.10M infusion
     :param inf45: Array of AUC values for 0.45M infusion
-    :param col10: Color for 0.10M data points and regression line
-    :param col45: Color for 0.45M data points and regression line
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
     :return: Figure object
     """

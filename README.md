@@ -24,9 +24,11 @@ After the initial pixi install, configure the git filter for nbstripout:
 
 ```bash
 pixi run nbstripout --install --attributes .gitattributes
+git config filter.nbstripout.clean "pixi run nbstripout --keep-metadata-keys metadata.kernelspec\\ metadata.language_info"
+git config diff.ipynb.textconv "pixi run nbstripout -t"
 ```
 
-This one-time setup configures git to automatically strip Jupyter notebook outputs and metadata when committing, preventing merge conflicts caused by cell execution counts and IDs changing locally.
+This one-time setup configures git to automatically strip notebook outputs while preserving kernel metadata (`metadata.kernelspec` and `metadata.language_info`) so VS Code can restore notebook kernels more reliably across machines.
 
 **Why is this needed?**
 The git filter configuration is stored in `.git/config` which is not version-controlled. Each machine needs to configure it locally. Without this, you'll see notebooks showing as modified even after syncing with the remote.
