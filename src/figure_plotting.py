@@ -520,3 +520,70 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
     return f
+
+
+def plot_lag_histogram(
+    ax,
+    lag_values,
+    lag_range,
+    colors=None,
+    colors_lines=None,
+    show_avg=False
+):
+    """
+    Plot lag histogram with option for sign-based bar colors and centered integer bins.
+    
+    :param ax: matplotlib axis to plot on
+    :param lag_values: Array of lag values to histogram
+    :param lag_range: Tuple of (min_lag, max_lag) for x-axis range
+    :param title: Title for the plot
+    :param colors_lines: List of [color1, color2] for mean and median lines (if None, uses defaults)
+    :param legend_loc: Location for legend
+    :param pos_color: Color for positive lags
+    :param neg_color: Color for negative lags
+    :param zero_color: Color for zero lag
+    """
+    if colors_lines is None:
+        colors_lines = ['#e74c3c', '#3498db']  # Default red and blue
+
+    if colors == None:
+        pos_color, zero_color, neg_color = '#d34d4d',  '#9a9a9a', '#3b6fb6'
+    elif len(colors) == 1:
+        pos_color, zero_color, neg_color = colors[0], colors[0], colors[0]
+    elif len(colors) == 3:
+        pos_color, zero_color, neg_color = colors
+    else:
+        print("Could not unpack colors properly. Make sure a list of 1 or 3 items")
+    
+    tick_min, tick_max = lag_range[0], lag_range[1]
+    ticks = np.arange(tick_min, tick_max + 1, 1)
+    bins = np.arange(tick_min - 0.5, tick_max + 1.5, 1)
+
+    counts, bin_edges, patches = ax.hist(
+        lag_values,
+        bins=bins,
+        edgecolor='k',
+        linewidth=1.5,
+    )
+
+    for left, right, patch in zip(bin_edges[:-1], bin_edges[1:], patches):
+        center = 0.5 * (left + right)
+        if center == 0:
+            patch.set_facecolor(zero_color)
+        elif center > 0:
+            patch.set_facecolor(pos_color)
+        else:
+            patch.set_facecolor(neg_color)
+        patch.set_alpha(0.8)
+    
+    if show_avg:
+        mean_val = np.nanmean(lag_values)
+        median_val = np.nanmedian(lag_values)
+
+        ax.axvline(mean_val, color=colors_lines[0], linestyle='--', linewidth=2.5,
+                label=f'Mean: {mean_val:.2f} trials')
+        ax.axvline(median_val, color=colors_lines[1], linestyle='--', linewidth=2,
+                label=f'Median: {median_val:.1f} trials')
+    ax.axvline(0, color='gray', linestyle=':', linewidth=1, alpha=0.5)
+
+    sns.despine(ax=ax)
