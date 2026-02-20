@@ -266,6 +266,44 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
         ax.plot([0, 0], [1, 2], color="black", lw=2, alpha=0.5, clip_on=False)
 
 
+def plot_lag_peak_sharpness(
+    ax,
+    lag_diff_df,
+    lag_diff_summary,
+    color,
+    mean_label="Mean ± SEM",
+    individual_color="gray",
+    individual_alpha=0.2,
+    individual_linewidth=1,
+    individual_markersize=4,
+):
+    """Draw lag-peak-sharpness traces on a provided axis."""
+    ax.errorbar(
+        lag_diff_summary["offset"].values,
+        lag_diff_summary["mean_diff"].values,
+        yerr=lag_diff_summary["sem_diff"].values,
+        marker="o",
+        capsize=5,
+        capthick=2,
+        linewidth=2,
+        markersize=5,
+        color=color,
+        label=mean_label,
+    )
+
+    for animal in lag_diff_df["animal"].unique():
+        animal_data = lag_diff_df.query("animal == @animal").sort_values("offset")
+        ax.plot(
+            animal_data["offset"],
+            animal_data["r_difference"],
+            "o-",
+            color=individual_color,
+            alpha=individual_alpha,
+            linewidth=individual_linewidth,
+            markersize=individual_markersize,
+        )
+
+
 def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     """
     Create a bar plot with AUC summary and individual data points overlaid.
