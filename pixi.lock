@@ -399,7 +399,7 @@ packages:
 - pypi: ./
   name: bazzino
   version: 0.0.0
-  sha256: 2f8cbc0a0ab540e3a67901160daaabd0bc9cf1331d9fdcbfad02bff3fc895673
+  sha256: aca99f1d835637965019c8a1649c6f46979e15d88e23c8403591909d9ef35620
   requires_python: '>=3.8'
 - conda: https://conda.anaconda.org/conda-forge/noarch/beautifulsoup4-4.14.3-pyha770c72_0.conda
   sha256: bf1e71c3c0a5b024e44ff928225a0874fc3c3356ec1a0b6fe719108e6d1288f6
