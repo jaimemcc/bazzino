@@ -27,6 +27,7 @@ def keep_dlc_bodyparts(
     bodyparts_to_keep: list[str],
     output_csv: Path | None = None,
     bodypart_level: int = 1,
+    strict_bodyparts: bool = False,
 ) -> None:
     """Keep only selected bodyparts in a DLC CSV and write back with the same header layout."""
     input_csv = Path(input_csv)
@@ -35,14 +36,30 @@ def keep_dlc_bodyparts(
     # DLC exports typically use a 3-row column header: scorer/bodyparts/coords.
     df = pd.read_csv(input_csv, header=[0, 1, 2])
 
-    keep = set(bodyparts_to_keep)
-    cols_to_keep = []
+    requested_bodyparts = list(dict.fromkeys(bodyparts_to_keep))
+    keep = set(requested_bodyparts)
+
+    metadata_cols: list[tuple] = []
+    cols_by_bodypart: dict[str, list[tuple]] = {bp: [] for bp in requested_bodyparts}
     for col in df.columns:
-        # Keep metadata-like header columns plus requested bodyparts.
-        if len(col) > bodypart_level and (
-            col[bodypart_level] in keep or col[bodypart_level] == "bodyparts"
-        ):
-            cols_to_keep.append(col)
+        if len(col) <= bodypart_level:
+            continue
+        bodypart = col[bodypart_level]
+        if bodypart == "bodyparts":
+            metadata_cols.append(col)
+            continue
+        if bodypart in keep:
+            cols_by_bodypart[bodypart].append(col)
+
+    cols_to_keep = metadata_cols
+    for bodypart in requested_bodyparts:
+        cols_to_keep.extend(cols_by_bodypart[bodypart])
+
+    missing = [bp for bp in requested_bodyparts if not cols_by_bodypart[bp]]
+    if strict_bodyparts and missing:
+        raise ValueError(
+            f"Requested bodyparts not found in {input_csv.name}: {missing}"
+        )
 
     if not cols_to_keep:
         raise ValueError(f"No columns matched requested bodyparts: {sorted(keep)}")
@@ -50,17 +67,11 @@ def keep_dlc_bodyparts(
     filtered = df.loc[:, cols_to_keep]
     filtered.to_csv(output_csv, index=False)
 
-    kept = sorted(
-        {
-            c[bodypart_level]
-            for c in cols_to_keep
-            if len(c) > bodypart_level and c[bodypart_level] != "bodyparts"
-        }
-    )
+    kept = [bp for bp in requested_bodyparts if cols_by_bodypart[bp]]
     print("DLC filter complete")
     print(f"Input file:      {input_csv}")
     print(f"Output file:     {output_csv}")
-    print(f"Bodyparts kept ({len(kept)}): {sorted(kept)}")
+    print(f"Bodyparts kept ({len(kept)}): {kept}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow overwriting existing output files.",
     )
+    parser.add_argument(
+        "--strict-bodyparts",
+        action="store_true",
+        help="Fail if any requested bodypart is missing from a CSV file.",
+    )
     return parser.parse_args()
 
 
@@ -137,7 +153,12 @@ def main() -> int:
             raise FileExistsError(
                 f"Output file already exists: {output_csv}. Use --overwrite to replace it."
             )
-        keep_dlc_bodyparts(input_path, bodyparts, output_csv=output_csv)
+        keep_dlc_bodyparts(
+            input_path,
+            bodyparts,
+            output_csv=output_csv,
+            strict_bodyparts=args.strict_bodyparts,
+        )
         return 0
 
     # Directory mode
@@ -159,7 +180,12 @@ def main() -> int:
                 if output_csv.exists() and not args.overwrite:
                     print(f"Skipping {csv_file.name} (output already exists)")
                     continue
-                keep_dlc_bodyparts(csv_file, bodyparts, output_csv=output_csv)
+                keep_dlc_bodyparts(
+                    csv_file,
+                    bodyparts,
+                    output_csv=output_csv,
+                    strict_bodyparts=args.strict_bodyparts,
+                )
                 processed += 1
             except Exception as e:
                 print(f"Error processing {csv_file}: {e}")
