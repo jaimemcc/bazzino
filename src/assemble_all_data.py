@@ -4,14 +4,15 @@ Assemble all data for Bazzino & Roitman sodium appetite project.
 This script runs the full data pipeline:
   1. Assemble behavioural (DLC) data — movement metric snips + x_array
   2. Assemble photometry data — photometry snips + x_array
-  3. Equalize photometry and DLC data so they match in length
-  4. Spectral clustering of photometry data (labels 0/1 added to x_array)
-  5. Compute cluster distances (clusterness, euclidean diff)
-  6. Sigmoidal transition fitting (deplete + 45NaCl only)
-  7. Combine behaviour and photometry x_arrays, realign trials
+    2b. Assemble Simba appetitive probability snips + x_array
+    3. Equalize photometry, DLC, and Simba datasets so they match row-for-row
+    4. Spectral clustering of photometry data (labels 0/1 added to x_array)
+    5. Compute cluster distances (clusterness, euclidean diff)
+    6. Sigmoidal transition fitting (deplete + 45NaCl only)
+    7. Combine behaviour and photometry x_arrays, realign trials
 
 Outputs a single pickle: data/assembled_data.pickle
-containing: x_array, snips_photo, snips_movement, fits_df, z_dep45
+containing: x_array, snips_photo, snips_simba, snips_movement, fits_df, z_dep45
 
 Usage:
     python src/assemble_all_data.py
@@ -48,6 +49,12 @@ from extract_behav_parameters import (
     calc_bodypart_movement, calc_angular_velocity,
     get_behav_snips, smooth_array,
 )
+from extract_simba import (
+    read_simba_probability,
+    make_simba_snips,
+    get_shifted_snip_means,
+    baseline_simba_snips,
+)
 
 # ──────────────────────────────────────────────────────────────────────
 # CONFIGURABLE PARAMETERS — edit these to change defaults
@@ -59,6 +66,7 @@ PARAMS = {
     "tank_folder": Path("D:/TestData/bazzino/from_paula"),
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
+    "simba_folder": Path("D:/TestData/bazzino/simba_preds"), #office
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -70,6 +78,15 @@ PARAMS = {
     "dlc_smooth_method": "gaussian",  # "gaussian", "moving_avg", "savgol", or None
     "dlc_smooth_window": 5,
     "dlc_zscore_to_baseline": False,
+    
+    # ── SIMBA parameters ──
+    "simba_probability_column": "Probability_Appetitive",
+    "simba_fps": 10,
+    "simba_pre_bins": 50,
+    "simba_post_bins": 150,
+    "simba_use_shifted_baseline": True,
+    "simba_shift_frames": 300,
+    "simba_n_shuffles": 1000,
 
     # ── Photometry parameters ──
     "photo_pre_seconds": 5,
@@ -116,12 +133,14 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
+    "cache_simba": False,          # Skip Simba extraction, load from cache
     "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
     "cache_photo_file": "_cache_photo.pickle",
+    "cache_simba_file": "_cache_simba.pickle",
     "cache_clustering_file": "_cache_clustering.pickle",
     "cache_transitions_file": "_cache_transitions.pickle",
 }
@@ -436,11 +455,107 @@ def assemble_behaviour(params):
     return snips_movement_all, snips_angvel_all, snips_movement_raw_all, x_all, behav_stats
 
 
+def assemble_simba(params):
+    """Assemble Simba prediction snips and x_array metadata."""
+    print("\n" + "=" * 60)
+    print("STEP 2b: Assembling Simba prediction snips")
+    print("=" * 60)
+
+    data_folder = params["data_folder"]
+    simba_folder = params["simba_folder"]
+
+    meta_df = pd.concat([
+        pd.read_csv(data_folder / "10NaCl_FileKey.csv"),
+        pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
+    ])
+
+    snips_list, x_list = [], []
+    for _, row in meta_df.iterrows():
+        stub = row["Folder"]
+        print(f"  Simba: {stub}", end=" ... ")
+        try:
+            prob_vec, src_file = read_simba_probability(
+                stub,
+                simba_folder,
+                probability_column=params["simba_probability_column"],
+            )
+
+            solenoid_ts = get_ttls(stub, data_folder)
+            snips = make_simba_snips(
+                prob_vec,
+                solenoid_ts,
+                fps=params["simba_fps"],
+                pre_bins=params["simba_pre_bins"],
+                post_bins=params["simba_post_bins"],
+            )
+
+            if params.get("simba_use_shifted_baseline", True):
+                shifted_means = get_shifted_snip_means(
+                    prob_vec,
+                    solenoid_ts,
+                    fps=params["simba_fps"],
+                    pre_bins=params["simba_pre_bins"],
+                    post_bins=params["simba_post_bins"],
+                    shift_frames=params["simba_shift_frames"],
+                    n_shuffles=params["simba_n_shuffles"],
+                )
+                snips = baseline_simba_snips(snips, shifted_means)
+
+            n = len(snips)
+            print(f"{n} trials ({src_file.name})")
+            snips_list.append(snips)
+
+            infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
+            x_list.append(pd.DataFrame({
+                "trial": np.arange(n),
+                "id": row["Subject"],
+                "condition": row["Physiological state"],
+                "infusiontype": infusion_label,
+            }))
+        except Exception as e:
+            print(f"ERROR: {e}")
+
+    if not snips_list:
+        raise RuntimeError("No Simba snips were assembled. Check simba_folder and input files.")
+
+    snips_all = np.concatenate(snips_list)
+    x_all = (
+        pd.concat(x_list, ignore_index=True)
+        .replace({"condition": _condition_map()})
+    )
+
+    subjects_df = (
+        pd.concat([
+            pd.read_csv(data_folder / "10NaCl_SubjectKey.csv").iloc[:, :2],
+            pd.read_csv(data_folder / "45NaCl_SubjectKey.csv").iloc[:, :2],
+        ])
+        .drop_duplicates()
+        .rename(columns={"Subject": "id", "Sex": "sex"})
+    )
+    x_all = pd.merge(x_all, subjects_df, on="id", how="left")
+
+    mask = ~x_all.condition.isin(params["conditions_to_exclude"])
+    snips_all = snips_all[mask.values]
+    x_all = x_all[mask].reset_index(drop=True)
+
+    print(f"  Simba assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
+    return snips_all, x_all
+
+
 # ──────────────────────────────────────────────────────────────────────
 # STEP 3: Equalize and combine
 # ──────────────────────────────────────────────────────────────────────
 
-def equalize_datasets(x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw=None):
+def equalize_datasets(
+    x_photo,
+    snips_photo,
+    x_behav,
+    snips_movement,
+    snips_angvel,
+    snips_movement_raw=None,
+    x_simba=None,
+    snips_simba=None,
+):
     """
     Step 3: Make sure photometry and behaviour datasets match row-for-row.
     Finds common rows based on (trial, id, condition, infusiontype) and
@@ -454,14 +569,21 @@ def equalize_datasets(x_photo, snips_photo, x_behav, snips_movement, snips_angve
     df_p = x_photo[merge_cols].reset_index(drop=True)
     df_b = x_behav[merge_cols].reset_index(drop=True)
 
-    if df_p.equals(df_b):
-        print("  Datasets already aligned.")
-        return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
+    merged = pd.merge(
+        df_p.assign(_idx_p=df_p.index),
+        df_b.assign(_idx_b=df_b.index),
+        on=merge_cols,
+        how="inner",
+    )
 
-    # Find common rows via inner merge
-    merged = pd.merge(df_p.assign(_idx_p=df_p.index),
-                       df_b.assign(_idx_b=df_b.index),
-                       on=merge_cols, how="inner")
+    if x_simba is not None and snips_simba is not None:
+        df_s = x_simba[merge_cols].reset_index(drop=True)
+        merged = pd.merge(
+            merged,
+            df_s.assign(_idx_s=df_s.index),
+            on=merge_cols,
+            how="inner",
+        )
 
     idx_p = merged["_idx_p"].values
     idx_b = merged["_idx_b"].values
@@ -475,9 +597,18 @@ def equalize_datasets(x_photo, snips_photo, x_behav, snips_movement, snips_angve
     if snips_movement_raw is not None:
         snips_movement_raw = snips_movement_raw[idx_b]
 
+    if x_simba is not None and snips_simba is not None:
+        idx_s = merged["_idx_s"].values
+        x_simba = x_simba.iloc[idx_s].reset_index(drop=True)
+        snips_simba = snips_simba[idx_s]
+
     print(f"  After equalization: {len(x_photo)} trials (photo), {len(x_behav)} trials (behav)")
+    if x_simba is not None:
+        print(f"                     {len(x_simba)} trials (simba)")
     assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
-    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
+    if x_simba is not None and snips_simba is not None:
+        assert len(x_photo) == len(x_simba), "Simba dataset is not aligned!"
+    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -846,8 +977,9 @@ def run_pipeline(params=None):
     print("=" * 60)
     print(f"  DLC folder: {params['dlc_folder']}")
     print(f"  Tank folder: {params['tank_folder']}")
+    print(f"  Simba folder: {params['simba_folder']}")
     print(f"  Calculating: movement + angular velocity (both always calculated)")
-    print(f"  Caching: behav={params['cache_behav']}, photo={params['cache_photo']}, "
+    print(f"  Caching: behav={params['cache_behav']}, photo={params['cache_photo']}, simba={params['cache_simba']}, "
           f"clustering={params['cache_clustering']}, transitions={params['cache_transitions']}")
 
     data_folder = params["data_folder"]
@@ -886,9 +1018,30 @@ def run_pipeline(params=None):
         _save_cache({"snips_photo": snips_photo, "x_photo": x_photo},
                     photo_cache_path, "photometry", params)
 
+    # Step 2b: Simba
+    simba_cache_path = data_folder / params["cache_simba_file"]
+    if params["cache_simba"]:
+        cached = _load_cache(simba_cache_path, "simba")
+    else:
+        cached = None
+    if cached is not None:
+        snips_simba, x_simba = cached["snips_simba"], cached["x_simba"]
+        print(f"  Simba from cache: {snips_simba.shape[0]} trials")
+    else:
+        snips_simba, x_simba = assemble_simba(params)
+        _save_cache({"snips_simba": snips_simba, "x_simba": x_simba},
+                    simba_cache_path, "simba", params)
+
     # Step 3: Equalize
-    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw = equalize_datasets(
-        x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw
+    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba = equalize_datasets(
+        x_photo,
+        snips_photo,
+        x_behav,
+        snips_movement,
+        snips_angvel,
+        snips_movement_raw,
+        x_simba=x_simba,
+        snips_simba=snips_simba,
     )
     
     # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
@@ -948,6 +1101,10 @@ def run_pipeline(params=None):
         "behav_zscored": params["dlc_zscore_to_baseline"],
         "behav_bodyparts": params.get("dlc_bodyparts"),
         "dlc_likelihood_threshold": params.get("dlc_likelihood_threshold", 0.6),
+        "simba_probability_column": params.get("simba_probability_column", "Probability_Appetitive"),
+        "simba_shifted_baseline": params.get("simba_use_shifted_baseline", True),
+        "simba_shift_frames": params.get("simba_shift_frames", 300),
+        "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
         "behav_metrics": "movement + angular_velocity (both always calculated)",
@@ -964,6 +1121,7 @@ def run_pipeline(params=None):
     output = {
         "x_array": x_combined,
         "snips_photo": snips_photo,
+        "snips_simba": snips_simba,
         "snips_movement": snips_movement,
         "snips_angvel": snips_angvel,
         "pca_transformed": pca_transformed,
@@ -987,6 +1145,7 @@ def run_pipeline(params=None):
     print("=" * 60)
     print(f"  x_array shape:          {x_combined.shape}")
     print(f"  snips_photo shape:      {snips_photo.shape}")
+    print(f"  snips_simba shape:      {snips_simba.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
     print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
