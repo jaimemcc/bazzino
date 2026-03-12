@@ -67,6 +67,7 @@ PARAMS = {
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
     "simba_folder": Path("D:/TestData/bazzino/simba_preds"), #office
+    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/Output_all_animals_appetitive"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -134,8 +135,8 @@ PARAMS = {
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": False,          # Skip Simba extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
