@@ -54,6 +54,7 @@ from extract_simba import (
     make_simba_snips,
     get_shifted_snip_means,
     baseline_simba_snips,
+    get_time_above_simba_ci,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -66,8 +67,8 @@ PARAMS = {
     "tank_folder": Path("D:/TestData/bazzino/from_paula"),
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
-    "simba_folder": Path("D:/TestData/bazzino/simba_preds"), #office
-    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/Output_all_animals_appetitive"), #laptop
+    "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
+    #"simba_folder": Path("C:/Users/jmc010/Data/bazzino/Output_all_animals_appetitive"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -85,9 +86,11 @@ PARAMS = {
     "simba_fps": 10,
     "simba_pre_bins": 50,
     "simba_post_bins": 150,
-    "simba_use_shifted_baseline": True,
+    "simba_use_shifted_baseline": False,
     "simba_shift_frames": 300,
-    "simba_n_shuffles": 1000,
+    "simba_n_shuffles": 100,
+    "simba_ci_percentile": 97.5,
+    "simba_zscore_to_entire_file": True,
 
     # ── Photometry parameters ──
     "photo_pre_seconds": 5,
@@ -135,8 +138,8 @@ PARAMS = {
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": False,          # Skip Simba extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -490,20 +493,35 @@ def assemble_simba(params):
                 post_bins=params["simba_post_bins"],
             )
 
+            shifted_means = get_shifted_snip_means(
+                prob_vec,
+                solenoid_ts,
+                fps=params["simba_fps"],
+                pre_bins=params["simba_pre_bins"],
+                post_bins=params["simba_post_bins"],
+                shift_frames=params["simba_shift_frames"],
+                n_shuffles=params["simba_n_shuffles"],
+            )
+
+            simba_pct_time_above_95ci, simba_ci_upper = get_time_above_simba_ci(
+                snips,
+                shifted_means,
+                percentile=params["simba_ci_percentile"],
+                start_bin=params["auc_start_bin"],
+                end_bin=params["auc_end_bin"],
+            )
+
             if params.get("simba_use_shifted_baseline", True):
-                shifted_means = get_shifted_snip_means(
-                    prob_vec,
-                    solenoid_ts,
-                    fps=params["simba_fps"],
-                    pre_bins=params["simba_pre_bins"],
-                    post_bins=params["simba_post_bins"],
-                    shift_frames=params["simba_shift_frames"],
-                    n_shuffles=params["simba_n_shuffles"],
-                )
                 snips = baseline_simba_snips(snips, shifted_means)
+                
+            if params.get("simba_zscore_to_entire_file", True):
+                # Z-score using mean and std of the entire probability vector
+                prob_mean = np.mean(prob_vec)
+                prob_std = np.std(prob_vec)
+                snips = (snips - prob_mean) / prob_std
 
             n = len(snips)
-            print(f"{n} trials ({src_file.name})")
+            print(f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f})")
             snips_list.append(snips)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
@@ -512,6 +530,7 @@ def assemble_simba(params):
                 "id": row["Subject"],
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
+                "simba_pct_time_above_95ci": simba_pct_time_above_95ci * 100.0,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
@@ -1051,6 +1070,14 @@ def run_pipeline(params=None):
         if col in x_behav.columns:
             x_photo[col] = x_behav[col]
 
+    if x_simba is not None:
+        simba_cols = ["simba_pct_time_above_95ci"]
+        for col in simba_cols:
+            if col in x_simba.columns:
+                x_photo[col] = x_simba[col].values
+            else:
+                print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
+
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
     if params["cache_clustering"]:
@@ -1106,6 +1133,7 @@ def run_pipeline(params=None):
         "simba_shifted_baseline": params.get("simba_use_shifted_baseline", True),
         "simba_shift_frames": params.get("simba_shift_frames", 300),
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
+        "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
         "behav_metrics": "movement + angular_velocity (both always calculated)",
