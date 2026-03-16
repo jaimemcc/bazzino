@@ -104,6 +104,28 @@ def baseline_simba_snips(real_snips, shifted_means):
     return real_snips - baseline
 
 
+def get_time_above_simba_ci(
+    real_snips,
+    shifted_means,
+    percentile=97.5,
+    start_bin=50,
+    end_bin=150,
+):
+    """Calculate per-trial proportion of bins above the shuffled upper CI bound."""
+    threshold = float(np.nanpercentile(shifted_means, percentile))
+    proportions = []
+
+    for snip in np.asarray(real_snips, dtype=float):
+        window = np.asarray(snip[start_bin:end_bin], dtype=float)
+        valid = window[~np.isnan(window)]
+        if valid.size == 0:
+            proportions.append(np.nan)
+        else:
+            proportions.append(np.mean(valid > threshold))
+
+    return np.asarray(proportions, dtype=float), threshold
+
+
 def count_bins_above_threshold(snips, threshold, start_bin=50, end_bin=150):
     """Count bins above threshold in infusion window for each trial."""
     return np.array([
