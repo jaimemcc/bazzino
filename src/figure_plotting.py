@@ -226,7 +226,7 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
     ax.set_yticks([])
 
 
-def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=None):
+def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, yscalebar=None, xscalebar=False):
     """
     Plot time series snips with error envelopes for two infusion types.
     
@@ -257,13 +257,14 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Non
     ax.set_ylim(ylims)
     
     # Time scale bar (5 seconds at bottom-right)
-    bar_y = ylims[0] + (ylims[1] - ylims[0]) * 0.05  # 5% above bottom of plot
-    ax.plot([15, 20], [bar_y, bar_y], color="black", lw=2, alpha=0.5, clip_on=False)
-    ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
+    if xscalebar:
+        bar_y = ylims[0] + (ylims[1] - ylims[0]) * 0.05  # 5% above bottom of plot
+        ax.plot([15, 20], [bar_y, bar_y], color="black", lw=2, alpha=0.2, clip_on=False)
+    # ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
     
     # Value scale bar (only for deplete, typically)
-    if scalebar is not None:
-        ax.plot([0, 0], [scalebar[0], scalebar[1]], color="black", lw=2, alpha=0.5, clip_on=False)
+    if yscalebar is not None:
+        ax.plot([0, 0], [yscalebar[0], yscalebar[1]], color="black", lw=2, alpha=0.2, clip_on=False)
 
 
 def plot_lag_peak_sharpness(
@@ -328,18 +329,18 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     ax.bar(barx[1] - spacer, np.mean(aucs[1][0]), color=colors[2], width=barwidth)
     ax.bar(barx[1] + spacer, np.mean(aucs[1][1]), color=colors[3], width=barwidth)
 
-    # Draw lines connecting paired values (10NaCl to 45NaCl within each condition)
-    # Replete: connect bars 0 and 1
-    for i in range(len(aucs[0][0])):
-        ax.plot([barx[0] - spacer, barx[0] + spacer], 
-                [aucs[0][0][i], aucs[0][1][i]], 
-                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
+    # # Draw lines connecting paired values (10NaCl to 45NaCl within each condition)
+    # # Replete: connect bars 0 and 1
+    # for i in range(len(aucs[0][0])):
+    #     ax.plot([barx[0] - spacer, barx[0] + spacer], 
+    #             [aucs[0][0][i], aucs[0][1][i]], 
+    #             color='gray', alpha=0.3, linewidth=0.5, zorder=1)
     
-    # Deplete: connect bars 2 and 3
-    for i in range(len(aucs[1][0])):
-        ax.plot([barx[1] - spacer, barx[1] + spacer], 
-                [aucs[1][0][i], aucs[1][1][i]], 
-                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
+    # # Deplete: connect bars 2 and 3
+    # for i in range(len(aucs[1][0])):
+    #     ax.plot([barx[1] - spacer, barx[1] + spacer], 
+    #             [aucs[1][0][i], aucs[1][1][i]], 
+    #             color='gray', alpha=0.3, linewidth=0.5, zorder=1)
 
     # Overlay individual points
     ax.scatter([barx[0] - spacer]*len(aucs[0][0]), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
@@ -520,8 +521,8 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
     :return: Figure object
     """
-    f, ax = plt.subplots(figsize=(1.8, 1.8),
-                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+    f, ax = plt.subplots(figsize=(2.2, 1.8),
+                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
 
     ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
     ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
@@ -544,13 +545,13 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
 
     sns.despine(ax=ax, offset=2)
 
-    ax.set_ylim([-80, 130])
+    ax.set_ylim([-100, 130])
   
-    # if yaxis:
-    #     ax.set_yticks([0, 0.5, 1])
-    #     ax.set_ylabel("Time moving")
-    # else:
-    #     ax.set_yticks([0, 0.5, 1], labels=["", "", ""])
+    if yaxis:
+        ax.set_yticks([-100, 0, 100])
+        ax.set_ylabel("AUC")
+    else:
+        ax.set_yticks([-100, 0, 100], labels=["", "", ""])
 
     ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
     ax.set_xlabel("Trial")
