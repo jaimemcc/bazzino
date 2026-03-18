@@ -137,9 +137,9 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": False,          # Skip Simba extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+    "cache_simba": True,          # Skip Simba extraction, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -905,6 +905,52 @@ def get_time_above_angvel_threshold(snips, threshold=1.0, start_bin=50, end_bin=
     return np.array(angvel_above)
 
 
+def get_auc_by_window(snips, start_bin=50, end_bin=150):
+    """Calculate per-trial AUC using trapezoidal integration over a bin window."""
+    snips = np.asarray(snips, dtype=float)
+    return np.array([np.trapezoid(snips[i, start_bin:end_bin]) for i in range(len(snips))])
+
+
+def sync_aligned_columns(target_df, source_df, merge_cols=None):
+    """Copy aligned metadata columns from source_df into target_df.
+
+    This keeps freshly recomputed columns available even when downstream cached
+    dataframes were created before those columns existed.
+    """
+    if merge_cols is None:
+        merge_cols = ["trial", "id", "condition", "infusiontype"]
+
+    source_cols = [col for col in source_df.columns if col not in merge_cols]
+    if not source_cols:
+        return target_df
+
+    if len(target_df) == len(source_df) and target_df[merge_cols].equals(source_df[merge_cols]):
+        for col in source_cols:
+            target_df[col] = source_df[col].values
+        return target_df
+
+    aligned_source = (
+        source_df[merge_cols + source_cols]
+        .drop_duplicates(subset=merge_cols)
+    )
+    target_df = (
+        target_df
+        .assign(_row_order=np.arange(len(target_df)))
+        .merge(aligned_source, on=merge_cols, how="left", suffixes=("", "_fresh"))
+        .sort_values("_row_order")
+        .drop(columns=["_row_order"])
+        .reset_index(drop=True)
+    )
+
+    for col in source_cols:
+        fresh_col = f"{col}_fresh"
+        if fresh_col in target_df.columns:
+            target_df[col] = target_df[fresh_col]
+            target_df = target_df.drop(columns=[fresh_col])
+
+    return target_df
+
+
 def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
@@ -919,9 +965,9 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    auc_snips = np.array([np.trapezoid(snips_photo[i, s:e]) for i in range(len(snips_photo))])
-    auc_movement = np.array([np.trapezoid(snips_movement_smooth[i, s:e]) for i in range(len(snips_movement_smooth))])
-    auc_angvel = np.array([np.trapezoid(snips_angvel_smooth[i, s:e]) for i in range(len(snips_angvel_smooth))])
+    auc_snips = get_auc_by_window(snips_photo, start_bin=s, end_bin=e)
+    auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
+    auc_angvel = get_auc_by_window(snips_angvel_smooth, start_bin=s, end_bin=e)
 
     # Calculate time moving (normalized)
     time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
@@ -1078,6 +1124,12 @@ def run_pipeline(params=None):
             else:
                 print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
 
+        # Recompute auc_simba from snips after extraction/equalization so this
+        # always refreshes even when Simba snips are loaded from cache.
+        s, e = params["auc_start_bin"], params["auc_end_bin"]
+        x_photo["auc_simba"] = get_auc_by_window(snips_simba, start_bin=s, end_bin=e)
+        print(f"  Added auc_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
+
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
     if params["cache_clustering"]:
@@ -1086,6 +1138,7 @@ def run_pipeline(params=None):
         cached = None
     if cached is not None:
         x_combined, pca_transformed = cached["x_combined"], cached["pca_transformed"]
+        x_combined = sync_aligned_columns(x_combined, x_photo)
         print(f"  Clustering from cache: {len(x_combined)} trials")
     else:
         x_combined, pca_transformed = cluster_photometry(snips_photo, x_photo, params)
