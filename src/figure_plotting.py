@@ -226,7 +226,7 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
     ax.set_yticks([])
 
 
-def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=False):
+def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=None):
     """
     Plot time series snips with error envelopes for two infusion types.
     
@@ -238,7 +238,7 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
     :param colors_10: color for 10NaCl line
     :param colors_45: color for 45NaCl line
     :param ylims: [ymin, ymax] limits for y-axis
-    :param scalebar: if True, draw a 1-unit scale bar at top-left
+    :param scalebar: if not None, use the provided values to draw a scale bar on the left
     """
     for snips, col in zip([snips_10, snips_45], [colors_10, colors_45]):
         x = np.arange(snips.shape[1]) / 10  # Convert bins to seconds
@@ -262,8 +262,8 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
     ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
     
     # Value scale bar (only for deplete, typically)
-    if scalebar:
-        ax.plot([0, 0], [1, 2], color="black", lw=2, alpha=0.5, clip_on=False)
+    if scalebar is not None:
+        ax.plot([0, 0], [scalebar[0], scalebar[1]], color="black", lw=2, alpha=0.5, clip_on=False)
 
 
 def plot_lag_peak_sharpness(
@@ -506,6 +506,56 @@ def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     ax.set_xlabel("Trial")
 
     # ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    return f
+
+def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :return: Figure object
+    """
+    f, ax = plt.subplots(figsize=(1.8, 1.8),
+                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+
+    ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
+    ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
+
+    r, p = draw_regression_line(inf10, ax, col10)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 150, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
+            va="bottom", ha="left")
+    
+    r, p = draw_regression_line(inf45, ax, col45)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 125, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+            va="bottom", ha="left")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-80, 130])
+  
+    # if yaxis:
+    #     ax.set_yticks([0, 0.5, 1])
+    #     ax.set_ylabel("Time moving")
+    # else:
+    #     ax.set_yticks([0, 0.5, 1], labels=["", "", ""])
+
+    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
     return f
 
