@@ -571,8 +571,8 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
     :return: Figure object
     """
-    f, ax = plt.subplots(figsize=(1.8, 1.8),
-                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+    f, ax = plt.subplots(figsize=(2.2, 1.8),
+                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
 
     ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
     ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
