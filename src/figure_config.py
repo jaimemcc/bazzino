@@ -6,9 +6,11 @@ consistency in colors, paths, and styling.
 """
 
 from pathlib import Path
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.colors as mcolors
 import seaborn as sns
 
 # ──────────────────────────────────────────────────────────────────────
@@ -39,7 +41,25 @@ COLOR_MAP = {
 }
 
 # Custom diverging colormap for heatmaps: blue (negative) - white (neutral) - red (positive)
-HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
+# HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list(
+#     'custom_diverging',
+#     ['#DF58A5', "white", '#7BC26D']  # Light pink, light green
+# )
+HEATMAP_CMAP_DIV = 'BrBG'
+
+base_cmap = plt.get_cmap("BrBG")
+
+HEATMAP_CMAP_DIV = mcolors.LinearSegmentedColormap.from_list(
+    "trimmed_coolwarm",
+    base_cmap(np.linspace(0.125, 0.875, 256))
+)
+
+# HEATMAP_CMAP_DIV = 'PiYG_r'
+# HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list(
+#     "custom_diverging",
+#     ["#7B3294", "white", "#E6AB02"]
+# )
+# HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
 HEATMAP_CMAP_RED = LinearSegmentedColormap.from_list(
     "white_to_darkred", 
     ["white", COLORS[3]]

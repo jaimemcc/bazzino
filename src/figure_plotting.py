@@ -353,6 +353,7 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     barx = [1, 2]
     barwidth = 0.35
     spacer = 0.2
+    jitter_k = 0.03  # Jitter factor for individual points
 
     # Plot bars (means)
     ax.bar(barx[0] - spacer, np.mean(aucs[0][0]), color=colors[0], width=barwidth)
@@ -360,24 +361,11 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     ax.bar(barx[1] - spacer, np.mean(aucs[1][0]), color=colors[2], width=barwidth)
     ax.bar(barx[1] + spacer, np.mean(aucs[1][1]), color=colors[3], width=barwidth)
 
-    # # Draw lines connecting paired values (10NaCl to 45NaCl within each condition)
-    # # Replete: connect bars 0 and 1
-    # for i in range(len(aucs[0][0])):
-    #     ax.plot([barx[0] - spacer, barx[0] + spacer], 
-    #             [aucs[0][0][i], aucs[0][1][i]], 
-    #             color='gray', alpha=0.3, linewidth=0.5, zorder=1)
-    
-    # # Deplete: connect bars 2 and 3
-    # for i in range(len(aucs[1][0])):
-    #     ax.plot([barx[1] - spacer, barx[1] + spacer], 
-    #             [aucs[1][0][i], aucs[1][1][i]], 
-    #             color='gray', alpha=0.3, linewidth=0.5, zorder=1)
-
     # Overlay individual points
-    ax.scatter([barx[0] - spacer]*len(aucs[0][0]), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[0] + spacer]*len(aucs[0][1]), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[1] - spacer]*len(aucs[1][0]), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
-    ax.scatter([barx[1] + spacer]*len(aucs[1][1]), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
+    ax.scatter([barx[0] - spacer]*len(aucs[0][0]) + np.random.normal(0, jitter_k, len(aucs[0][0])), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
+    ax.scatter([barx[0] + spacer]*len(aucs[0][1]) + np.random.normal(0, jitter_k, len(aucs[0][1])), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
+    ax.scatter([barx[1] - spacer]*len(aucs[1][0]) + np.random.normal(0, jitter_k, len(aucs[1][0])), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
+    ax.scatter([barx[1] + spacer]*len(aucs[1][1]) + np.random.normal(0, jitter_k, len(aucs[1][1])), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
 
     # Styling
     sns.despine(ax=ax, top=True, right=True, left=False, bottom=True)
