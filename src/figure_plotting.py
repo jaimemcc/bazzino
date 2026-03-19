@@ -114,6 +114,29 @@ def get_heatmap_data(snips, x_array, condition, infusiontype):
         
     return np.array(heatmap_data)
 
+def get_heatmap_data_by_rat(snips, x_array, condition, infusiontype):
+    """
+    Extract snips for a specific condition and infusion type, averaged by trial.
+    
+    Creates a 2D array where each row is a trial with the trial's average across all samples.
+    
+    :param snips: 2D array of snips (samples x timepoints)
+    :param x_array: DataFrame with trial metadata (must have columns: condition, infusiontype, trial)
+    :param condition: "replete" or "deplete"
+    :param infusiontype: "10NaCl" or "45NaCl"
+    :return: 2D array of trial-averaged snips (trials x timepoints)
+    """
+    query_string = "condition == @condition & infusiontype == @infusiontype"
+    
+    heatmap_data = []
+    df = x_array.query(query_string)
+    for id in df.id.unique():
+        tmp_snips = snips[x_array.query(query_string + " & id == @id").index]
+        mean_snip = np.nanmean(tmp_snips, axis=0)
+        heatmap_data.append(mean_snip)
+        
+    return np.array(heatmap_data)
+
 
 def get_mean_snips(snips, x_array, condition):
     """
@@ -151,6 +174,14 @@ def get_auc(snips, start_bin=50, end_bin=150):
         auc.append(np.trapezoid(snip[start_bin:end_bin]))
     return np.array(auc)
 
+def get_trial_data_by_rat(snips, x_array, condition, infusiontype):
+
+    query_string = "condition == @condition & infusiontype == @infusiontype"
+
+    trial_data = []
+    for id in x_array.query(query_string).id.unique():
+        trial_data.append(x_array.query(query_string + " & id == @id").auc_simba.values)  # Get index of first sample for this animal
+    return np.array(trial_data)
 
 # ──────────────────────────────────────────────────────────────────────
 # Figure Initialization Functions
