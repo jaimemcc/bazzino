@@ -579,7 +579,7 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
     
     return f
 
-def make_correlation_plot_simba_1group(inf, color, yaxis=False):
+def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
     
@@ -588,19 +588,37 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False):
     :param col10: Color for 0.10M data points and fit line
     :param col45: Color for 0.45M data points and fit line
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
-    :return: Figure object
+    :param fit: Fit type ("linear" or "sigmoid")
+    :param return_stats: If True, return (figure, r_value, p_value); otherwise return figure only
+    :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
     """
-    f, ax = plt.subplots(figsize=(2.2, 1.4),
-                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
+    f, ax = plt.subplots(figsize=(1.3, 1.8),
+                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
 
-    ax.scatter(np.arange(len(inf)), inf, color=color, alpha=0.3)
+    x = np.arange(len(inf))
+    ax.scatter(x, inf, color=color, alpha=0.3)
+    r_value, p_value = stats.linregress(x, inf)[2:4]
 
-    r, p = draw_regression_line(inf, ax, color)
-    if p < 0.001:
-        p = "p<0.001"
+    if fit == "linear":
+        draw_regression_line(inf, ax, color)
+        
+    elif fit == "sigmoid":
+        from scipy.optimize import curve_fit
+
+        def _sigmoid_model(x, L, k, x0, b):
+            z = np.clip(-k * (x - x0), -60, 60)
+            return L / (1 + np.exp(z)) + b
+
+        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _sigmoid_model(x_fit, *popt)
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+
+    if p_value < 0.001:
+        p_text = "p<0.001"
     else:
-        p = f"p={p:.3f}"
-    ax.text(25, 1.4, f"r={r:.2f}, {p}", color=color, fontsize=8,
+        p_text = f"p={p_value:.3f}"
+    ax.text(25, 1.4, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
             va="bottom", ha="center")
 
     sns.despine(ax=ax, offset=2)
@@ -613,11 +631,13 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False):
     else:
         ax.set_yticks([-1, 0, 1], labels=["", "", ""])
 
-    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
 
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
+    if return_stats:
+        return f, r_value, p_value
     return f
 
 def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
@@ -668,6 +688,66 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
 
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
+    return f
+
+
+def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
+    """
+    Create a one-group correlation plot for dopamine (AUC) values across trials.
+
+    :param inf: Array of dopamine (AUC) values for a single group
+    :param color: Color for data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show minimal tick labels
+    :param fit: Fit type ("linear" or "sigmoid")
+    :param return_stats: If True, return (figure, r_value, p_value); otherwise return figure only
+    :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
+    """
+    f, ax = plt.subplots(figsize=(1.3, 1.8),
+                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
+
+    x = np.arange(len(inf))
+    ax.scatter(x, inf, color=color, alpha=0.3)
+    r_value, p_value = stats.linregress(x, inf)[2:4]
+
+    if fit == "linear":
+        draw_regression_line(inf, ax, color)
+
+    elif fit == "sigmoid":
+        from scipy.optimize import curve_fit
+
+        def _sigmoid_model(x, L, k, x0, b):
+            z = np.clip(-k * (x - x0), -60, 60)
+            return L / (1 + np.exp(z)) + b
+
+        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[250, 0.1, 25, -60], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _sigmoid_model(x_fit, *popt)
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+
+    if p_value < 0.001:
+        p_text = "p<0.001"
+    else:
+        p_text = f"p={p_value:.3f}"
+    ax.text(25, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+            va="bottom", ha="center")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-65, 180])
+
+    if yaxis:
+        ax.set_yticks([-50, 0, 50, 100, 150])
+        ax.set_ylabel("Dopamine (AUC)")
+    else:
+        ax.set_yticks([-50, 0, 50, 100, 150], labels=["", "", "", "", ""])
+
+    ax.set_xticks([0, 49])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+
+    if return_stats:
+        return f, r_value, p_value
     return f
 
 
