@@ -348,7 +348,7 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     :return: (fig, ax) tuple
     """
     f, ax = plt.subplots(figsize=figsize,
-                         gridspec_kw={"left": 0.3, "right": 0.95, "top": 0.95, "bottom": 0.2})
+                         gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.95, "bottom": 0.2})
 
     barx = [1, 2]
     barwidth = 0.35
@@ -551,7 +551,7 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
         p = "p<0.001"
     else:
         p = f"p={p:.3f}"
-    ax.text(0, 150, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
+    ax.text(0, 1.4, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
             va="bottom", ha="left")
     
     r, p = draw_regression_line(inf45, ax, col45)
@@ -559,18 +559,59 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
         p = "p<0.001"
     else:
         p = f"p={p:.3f}"
-    ax.text(0, 125, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+    ax.text(0, 1.2, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
             va="bottom", ha="left")
 
     sns.despine(ax=ax, offset=2)
 
-    ax.set_ylim([-100, 130])
+    ax.set_ylim([-1, 1])
   
     if yaxis:
-        ax.set_yticks([-100, 0, 100])
-        ax.set_ylabel("AUC")
+        ax.set_yticks([-1, 0, 1])
+        ax.set_ylabel("Appetitive Probability")
     else:
-        ax.set_yticks([-100, 0, 100], labels=["", "", ""])
+        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
+
+    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    return f
+
+def make_correlation_plot_simba_1group(inf, color, yaxis=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :return: Figure object
+    """
+    f, ax = plt.subplots(figsize=(2.2, 1.4),
+                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
+
+    ax.scatter(np.arange(len(inf)), inf, color=color, alpha=0.3)
+
+    r, p = draw_regression_line(inf, ax, color)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(25, 1.4, f"r={r:.2f}, {p}", color=color, fontsize=8,
+            va="bottom", ha="center")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-1, 1.3])
+  
+    if yaxis:
+        ax.set_yticks([-1, 0, 1])
+        ax.set_ylabel("Appetitive Probability")
+    else:
+        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
 
     ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
     ax.set_xlabel("Trial")
