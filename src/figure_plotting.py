@@ -180,7 +180,7 @@ def get_trial_data_by_rat(snips, x_array, condition, infusiontype):
 
     trial_data = []
     for id in x_array.query(query_string).id.unique():
-        trial_data.append(x_array.query(query_string + " & id == @id").auc_simba.values)  # Get index of first sample for this animal
+        trial_data.append(x_array.query(query_string + " & id == @id").mean_simba.values)  # Get index of first sample for this animal
     return np.array(trial_data)
 
 # ──────────────────────────────────────────────────────────────────────
