@@ -911,6 +911,12 @@ def get_auc_by_window(snips, start_bin=50, end_bin=150):
     return np.array([np.trapezoid(snips[i, start_bin:end_bin]) for i in range(len(snips))])
 
 
+def get_mean_by_window(snips, start_bin=50, end_bin=150):
+    """Calculate per-trial mean over a bin window."""
+    snips = np.asarray(snips, dtype=float)
+    return np.nanmean(snips[:, start_bin:end_bin], axis=1)
+
+
 def sync_aligned_columns(target_df, source_df, merge_cols=None):
     """Copy aligned metadata columns from source_df into target_df.
 
@@ -1124,11 +1130,11 @@ def run_pipeline(params=None):
             else:
                 print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
 
-        # Recompute auc_simba from snips after extraction/equalization so this
+        # Recompute mean_simba from snips after extraction/equalization so this
         # always refreshes even when Simba snips are loaded from cache.
         s, e = params["auc_start_bin"], params["auc_end_bin"]
-        x_photo["auc_simba"] = get_auc_by_window(snips_simba, start_bin=s, end_bin=e)
-        print(f"  Added auc_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
+        x_photo["mean_simba"] = get_mean_by_window(snips_simba, start_bin=s, end_bin=e)
+        print(f"  Added mean_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
 
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
