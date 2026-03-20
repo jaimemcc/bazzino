@@ -6,12 +6,16 @@ consistency in colors, paths, and styling.
 """
 
 from pathlib import Path
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.colors as mcolors
 import seaborn as sns
+from color_schemes import (
+    ACTIVE_COLOR_SCHEME_NAME,
+    GROUP_ORDER,
+    get_color_scheme,
+    make_diverging_colormap,
+)
 
 # ──────────────────────────────────────────────────────────────────────
 # Matplotlib Configuration
@@ -28,31 +32,18 @@ def configure_matplotlib():
 # Color Palette
 # ──────────────────────────────────────────────────────────────────────
 
-# Color scheme for conditions and infusion types
+ACTIVE_COLOR_SCHEME = get_color_scheme(ACTIVE_COLOR_SCHEME_NAME)
+
+# Color scheme for conditions and infusion types in GROUP_ORDER:
 # [replete_10NaCl, replete_45NaCl, deplete_10NaCl, deplete_45NaCl]
-COLORS = ["#67AFD2", "#016895", "#F4795B", "#C74632"]
+COLORS = [ACTIVE_COLOR_SCHEME["group_colors"][k] for k in GROUP_ORDER]
 
 # Dictionary mapping condition/infusion combinations to colors
-COLOR_MAP = {
-    ("replete", "10NaCl"): COLORS[0],
-    ("replete", "45NaCl"): COLORS[1],
-    ("deplete", "10NaCl"): COLORS[2],
-    ("deplete", "45NaCl"): COLORS[3],
-}
+COLOR_MAP = dict(ACTIVE_COLOR_SCHEME["group_colors"])
 
 # Custom diverging colormap for heatmaps: blue (negative) - white (neutral) - red (positive)
-# HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list(
-#     'custom_diverging',
-#     ['#DF58A5', "white", '#7BC26D']  # Light pink, light green
-# )
-HEATMAP_CMAP_DIV = 'BrBG'
-
-base_cmap = plt.get_cmap("BrBG")
-
-HEATMAP_CMAP_DIV = mcolors.LinearSegmentedColormap.from_list(
-    "trimmed_coolwarm",
-    base_cmap(np.linspace(0.125, 0.875, 256))
-)
+HEATMAP_CMAP_DIV = make_diverging_colormap()
+HEATMAP_CMAP = HEATMAP_CMAP_DIV
 
 # HEATMAP_CMAP_DIV = 'PiYG_r'
 # HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list(
@@ -61,12 +52,12 @@ HEATMAP_CMAP_DIV = mcolors.LinearSegmentedColormap.from_list(
 # )
 # HEATMAP_CMAP_DIV = LinearSegmentedColormap.from_list("custom_diverging", [COLORS[1], "white", COLORS[3]])
 HEATMAP_CMAP_RED = LinearSegmentedColormap.from_list(
-    "white_to_darkred", 
-    ["white", COLORS[3]]
+    "white_to_positive",
+    ["white", ACTIVE_COLOR_SCHEME["diverging"]["positive"]],
 )
 HEATMAP_CMAP_BLUE = LinearSegmentedColormap.from_list(
-    "white_to_darkblue", 
-    ["white", COLORS[1]]
+    "white_to_negative",
+    ["white", ACTIVE_COLOR_SCHEME["diverging"]["negative"]],
 )
 
 # ──────────────────────────────────────────────────────────────────────
