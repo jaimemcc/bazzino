@@ -251,7 +251,10 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
     
     if inf_bar:
         # Draw infusion window indicator bar at bottom of heatmap
+        ax.plot([0, 50], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
         ax.plot([50, 150], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
+        ax.plot([150, 250], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
+        
         
     ax.set_xticks([])
     ax.set_yticks([])
@@ -612,6 +615,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
+        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
 
     if p_value < 0.001:
@@ -703,7 +707,7 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
     :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
     """
     f, ax = plt.subplots(figsize=(1.3, 1.8),
-                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
+                         gridspec_kw={"left": 0.43, "right": 0.90, "top": 0.85, "bottom": 0.24})
 
     x = np.arange(len(inf))
     ax.scatter(x, inf, color=color, alpha=0.3)
@@ -723,12 +727,13 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
 
     if p_value < 0.001:
         p_text = "p<0.001"
     else:
         p_text = f"p={p_value:.3f}"
-    ax.text(25, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+    ax.text(20, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
             va="bottom", ha="center")
 
     sns.despine(ax=ax, offset=2)
