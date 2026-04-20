@@ -27,3 +27,4 @@ tdt = ">=0.7.3, <0.8"
 trompy = ">=0.16.5, <0.17"
 bazzino = { path = ".", editable = true }
 nbstripout = ">=0.9.1, <0.10"
+umap-learn = ">=0.5.11, <0.6"

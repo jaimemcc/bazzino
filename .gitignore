@@ -179,7 +179,5 @@ cython_debug/
 # Project specific ignores
 results/*
 paper/figs/panels/*
-paper/figs/*.afdesign
-paper/figs/bazzino_figs_v03.afdesign~lock~
 data/PB*
 
