@@ -773,7 +773,7 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     return f
 
 
-def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
+def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", return_stats=False, print_stats=True, ylim=None):
     """
     Create a one-group correlation plot for dopamine (AUC) values across trials.
 
@@ -807,31 +807,37 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
 
-    if p_value < 0.001:
-        p_text = "p<0.001"
-    else:
-        p_text = f"p={p_value:.3f}"
-    ax.text(20, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
-            va="bottom", ha="center")
+    if print_stats:
+        if p_value < 0.001:
+            p_text = "p<0.001"
+        else:
+            p_text = f"p={p_value:.3f}"
+        ax.text(20, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+                va="bottom", ha="center")
 
     sns.despine(ax=ax, offset=2)
-
-    ax.set_ylim([-65, 180])
 
     if yaxis:
         ax.set_yticks([-50, 0, 50, 100, 150])
         ax.set_ylabel("Dopamine (AUC)")
     else:
         ax.set_yticks([-50, 0, 50, 100, 150], labels=["", "", "", "", ""])
+        
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    else:
+        ax.set_ylim([-65, 180])
 
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
+    ax.set_xlim([-5, 50])
 
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
 
     if return_stats:
         return f, r_value, p_value
-    return f
+    
+    return f, ax
 
 
 def plot_lag_histogram(

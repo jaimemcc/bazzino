@@ -64,7 +64,8 @@ PARAMS = {
     # ── Paths ──
     "data_folder": Path("data"),
     "results_folder": Path("results"),
-    "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    # "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    "tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
     "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
@@ -93,8 +94,8 @@ PARAMS = {
     "simba_zscore_to_entire_file": True,
 
     # ── Photometry parameters ──
-    "photo_pre_seconds": 5,
-    "photo_post_seconds": 15,
+    "photo_baseline_seconds": 5,
+    "photo_triallength_seconds": 20,
     "photo_bins": 200,
 
     # ── Conditions to exclude ──
@@ -138,8 +139,8 @@ PARAMS = {
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": True,          # Skip Simba extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -261,8 +262,8 @@ def get_photometry_snips(tank, params):
     sol = data.epocs.sol_.onset
     snips = tp.snipper(
         filtered_sig, sol, fs=fs,
-        pre=params["photo_pre_seconds"],
-        post=params["photo_post_seconds"],
+        baseline_length=params["photo_baseline_seconds"],
+        trial_length=params["photo_triallength_seconds"],
         bins=params["photo_bins"],
     )[0]
     return snips
@@ -686,7 +687,8 @@ def cluster_photometry(snips_photo, x_array, params):
 
     # Final clustering with chosen n_clusters
     model = SpectralClustering(
-        n_clusters=n_clusters,
+        # n_clusters=n_clusters,
+        n_clusters=2,
         affinity=params["clustering_affinity"],
         assign_labels=params["clustering_assign_labels"],
         random_state=123,
@@ -697,7 +699,7 @@ def cluster_photometry(snips_photo, x_array, params):
 
     # Reorder clusters so cluster 0 = most positive response during infusion
     # This matches the reorder_clusters function from spectral_clustering_all_trials.ipynb
-    pre_window = int(params["photo_pre_seconds"] * 10)  # 50 bins
+    pre_window = int(params["photo_baseline_seconds"] * 10)  # 50 bins
     uniquelabels = list(set(model.labels_))
     responses = np.nan * np.ones((len(uniquelabels),))
     for l, label in enumerate(uniquelabels):
