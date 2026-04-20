@@ -51,9 +51,11 @@ from extract_behav_parameters import (
 )
 from extract_simba import (
     read_simba_probability,
+    get_cam1_onsets_for_stub,
     make_simba_snips,
     get_shifted_snip_means,
     baseline_simba_snips,
+    get_time_above_simba_ci,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -63,11 +65,12 @@ PARAMS = {
     # ── Paths ──
     "data_folder": Path("data"),
     "results_folder": Path("results"),
-    "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    # "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    "tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
-    "simba_folder": Path("D:/TestData/bazzino/simba_preds"), #office
-    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/Output_all_animals_appetitive"), #laptop
+    # "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
+    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/simba"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -83,15 +86,18 @@ PARAMS = {
     # ── SIMBA parameters ──
     "simba_probability_column": "Probability_Appetitive",
     "simba_fps": 10,
+    "simba_use_cam1_timestamps": True,
     "simba_pre_bins": 50,
     "simba_post_bins": 150,
-    "simba_use_shifted_baseline": True,
+    "simba_use_shifted_baseline": False,
     "simba_shift_frames": 300,
-    "simba_n_shuffles": 1000,
+    "simba_n_shuffles": 100,
+    "simba_ci_percentile": 97.5,
+    "simba_zscore_to_entire_file": True,
 
     # ── Photometry parameters ──
-    "photo_pre_seconds": 5,
-    "photo_post_seconds": 15,
+    "photo_baseline_seconds": 5,
+    "photo_triallength_seconds": 20,
     "photo_bins": 200,
 
     # ── Conditions to exclude ──
@@ -258,8 +264,8 @@ def get_photometry_snips(tank, params):
     sol = data.epocs.sol_.onset
     snips = tp.snipper(
         filtered_sig, sol, fs=fs,
-        pre=params["photo_pre_seconds"],
-        post=params["photo_post_seconds"],
+        baseline_length=params["photo_baseline_seconds"],
+        trial_length=params["photo_triallength_seconds"],
         bins=params["photo_bins"],
     )[0]
     return snips
@@ -482,28 +488,57 @@ def assemble_simba(params):
             )
 
             solenoid_ts = get_ttls(stub, data_folder)
+            cam1_onsets = None
+            alignment_method = "fps"
+            if params.get("simba_use_cam1_timestamps", True):
+                try:
+                    cam1_onsets = get_cam1_onsets_for_stub(stub, params["tank_folder"])
+                    alignment_method = "cam1"
+                except Exception as cam_exc:
+                    print(f"Cam1 unavailable, falling back to fps ({cam_exc})", end="; ")
+
             snips = make_simba_snips(
                 prob_vec,
                 solenoid_ts,
                 fps=params["simba_fps"],
                 pre_bins=params["simba_pre_bins"],
                 post_bins=params["simba_post_bins"],
+                cam1_onsets=cam1_onsets,
+            )
+
+            shifted_means = get_shifted_snip_means(
+                prob_vec,
+                solenoid_ts,
+                fps=params["simba_fps"],
+                pre_bins=params["simba_pre_bins"],
+                post_bins=params["simba_post_bins"],
+                shift_frames=params["simba_shift_frames"],
+                n_shuffles=params["simba_n_shuffles"],
+                cam1_onsets=cam1_onsets,
+            )
+
+            simba_pct_time_above_95ci, simba_ci_upper = get_time_above_simba_ci(
+                snips,
+                shifted_means,
+                percentile=params["simba_ci_percentile"],
+                start_bin=params["auc_start_bin"],
+                end_bin=params["auc_end_bin"],
             )
 
             if params.get("simba_use_shifted_baseline", True):
-                shifted_means = get_shifted_snip_means(
-                    prob_vec,
-                    solenoid_ts,
-                    fps=params["simba_fps"],
-                    pre_bins=params["simba_pre_bins"],
-                    post_bins=params["simba_post_bins"],
-                    shift_frames=params["simba_shift_frames"],
-                    n_shuffles=params["simba_n_shuffles"],
-                )
                 snips = baseline_simba_snips(snips, shifted_means)
+                
+            if params.get("simba_zscore_to_entire_file", True):
+                # Z-score using mean and std of the entire probability vector
+                prob_mean = np.mean(prob_vec)
+                prob_std = np.std(prob_vec)
+                snips = (snips - prob_mean) / prob_std
 
             n = len(snips)
-            print(f"{n} trials ({src_file.name})")
+            print(
+                f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f}, "
+                f"align={alignment_method})"
+            )
             snips_list.append(snips)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
@@ -512,6 +547,8 @@ def assemble_simba(params):
                 "id": row["Subject"],
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
+                "simba_pct_time_above_95ci": simba_pct_time_above_95ci * 100.0,
+                "simba_alignment_method": alignment_method,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
@@ -667,7 +704,8 @@ def cluster_photometry(snips_photo, x_array, params):
 
     # Final clustering with chosen n_clusters
     model = SpectralClustering(
-        n_clusters=n_clusters,
+        # n_clusters=n_clusters,
+        n_clusters=2, # Force 2 clusters for better interpretability, silhouette is almost identical to n=4
         affinity=params["clustering_affinity"],
         assign_labels=params["clustering_assign_labels"],
         random_state=123,
@@ -678,7 +716,7 @@ def cluster_photometry(snips_photo, x_array, params):
 
     # Reorder clusters so cluster 0 = most positive response during infusion
     # This matches the reorder_clusters function from spectral_clustering_all_trials.ipynb
-    pre_window = int(params["photo_pre_seconds"] * 10)  # 50 bins
+    pre_window = int(params["photo_baseline_seconds"] * 10)  # 50 bins
     uniquelabels = list(set(model.labels_))
     responses = np.nan * np.ones((len(uniquelabels),))
     for l, label in enumerate(uniquelabels):
@@ -886,6 +924,58 @@ def get_time_above_angvel_threshold(snips, threshold=1.0, start_bin=50, end_bin=
     return np.array(angvel_above)
 
 
+def get_auc_by_window(snips, start_bin=50, end_bin=150):
+    """Calculate per-trial AUC using trapezoidal integration over a bin window."""
+    snips = np.asarray(snips, dtype=float)
+    return np.array([np.trapezoid(snips[i, start_bin:end_bin]) for i in range(len(snips))])
+
+
+def get_mean_by_window(snips, start_bin=50, end_bin=150):
+    """Calculate per-trial mean over a bin window."""
+    snips = np.asarray(snips, dtype=float)
+    return np.nanmean(snips[:, start_bin:end_bin], axis=1)
+
+
+def sync_aligned_columns(target_df, source_df, merge_cols=None):
+    """Copy aligned metadata columns from source_df into target_df.
+
+    This keeps freshly recomputed columns available even when downstream cached
+    dataframes were created before those columns existed.
+    """
+    if merge_cols is None:
+        merge_cols = ["trial", "id", "condition", "infusiontype"]
+
+    source_cols = [col for col in source_df.columns if col not in merge_cols]
+    if not source_cols:
+        return target_df
+
+    if len(target_df) == len(source_df) and target_df[merge_cols].equals(source_df[merge_cols]):
+        for col in source_cols:
+            target_df[col] = source_df[col].values
+        return target_df
+
+    aligned_source = (
+        source_df[merge_cols + source_cols]
+        .drop_duplicates(subset=merge_cols)
+    )
+    target_df = (
+        target_df
+        .assign(_row_order=np.arange(len(target_df)))
+        .merge(aligned_source, on=merge_cols, how="left", suffixes=("", "_fresh"))
+        .sort_values("_row_order")
+        .drop(columns=["_row_order"])
+        .reset_index(drop=True)
+    )
+
+    for col in source_cols:
+        fresh_col = f"{col}_fresh"
+        if fresh_col in target_df.columns:
+            target_df[col] = target_df[fresh_col]
+            target_df = target_df.drop(columns=[fresh_col])
+
+    return target_df
+
+
 def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
@@ -900,9 +990,9 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    auc_snips = np.array([np.trapezoid(snips_photo[i, s:e]) for i in range(len(snips_photo))])
-    auc_movement = np.array([np.trapezoid(snips_movement_smooth[i, s:e]) for i in range(len(snips_movement_smooth))])
-    auc_angvel = np.array([np.trapezoid(snips_angvel_smooth[i, s:e]) for i in range(len(snips_angvel_smooth))])
+    auc_snips = get_auc_by_window(snips_photo, start_bin=s, end_bin=e)
+    auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
+    auc_angvel = get_auc_by_window(snips_angvel_smooth, start_bin=s, end_bin=e)
 
     # Calculate time moving (normalized)
     time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
@@ -1051,6 +1141,20 @@ def run_pipeline(params=None):
         if col in x_behav.columns:
             x_photo[col] = x_behav[col]
 
+    if x_simba is not None:
+        simba_cols = ["simba_pct_time_above_95ci"]
+        for col in simba_cols:
+            if col in x_simba.columns:
+                x_photo[col] = x_simba[col].values
+            else:
+                print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
+
+        # Recompute mean_simba from snips after extraction/equalization so this
+        # always refreshes even when Simba snips are loaded from cache.
+        s, e = params["auc_start_bin"], params["auc_end_bin"]
+        x_photo["mean_simba"] = get_mean_by_window(snips_simba, start_bin=s, end_bin=e)
+        print(f"  Added mean_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
+
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
     if params["cache_clustering"]:
@@ -1059,6 +1163,7 @@ def run_pipeline(params=None):
         cached = None
     if cached is not None:
         x_combined, pca_transformed = cached["x_combined"], cached["pca_transformed"]
+        x_combined = sync_aligned_columns(x_combined, x_photo)
         print(f"  Clustering from cache: {len(x_combined)} trials")
     else:
         x_combined, pca_transformed = cluster_photometry(snips_photo, x_photo, params)
@@ -1106,6 +1211,7 @@ def run_pipeline(params=None):
         "simba_shifted_baseline": params.get("simba_use_shifted_baseline", True),
         "simba_shift_frames": params.get("simba_shift_frames", 300),
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
+        "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
         "behav_metrics": "movement + angular_velocity (both always calculated)",

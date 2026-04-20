@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import tdt
 
 
 def find_simba_file(stub, simba_folder):
@@ -33,6 +34,57 @@ def read_simba_probability(stub, simba_folder, probability_column="Probability_A
     return pd.to_numeric(df[probability_column], errors="coerce").fillna(0.0).to_numpy(), file_path
 
 
+def get_cam1_onsets_for_stub(stub, tank_folder):
+    """Load Cam1 onset timestamps for a session stub from its TDT tank."""
+    tank_path = Path(tank_folder) / stub
+    data = tdt.read_block(str(tank_path), evtype=["epocs"])
+    try:
+        onsets = np.asarray(data.epocs["Cam1"].onset, dtype=float)
+    except Exception as exc:
+        available = []
+        try:
+            available = list(data.epocs.keys())
+        except Exception:
+            pass
+        raise KeyError(
+            f"Could not read Cam1 onsets for stub '{stub}'. "
+            f"Available epocs: {available}"
+        ) from exc
+
+    if onsets.size < 2:
+        raise ValueError(f"Cam1 onsets for stub '{stub}' have fewer than 2 timestamps.")
+
+    return onsets
+
+
+def _get_trial_ttls(solenoid_ts):
+    """Return trial TTL timestamps, matching existing behavior of skipping final pulse."""
+    ts = np.asarray(solenoid_ts, dtype=float)
+    if ts.size < 2:
+        return np.asarray([], dtype=float)
+    ts = ts[:-1]
+    return ts[np.isfinite(ts)]
+
+
+def _map_tdt_times_to_nearest_frame_indices(event_times, cam1_onsets):
+    """Map TDT event times (seconds) to nearest Cam1 frame index."""
+    event_times = np.asarray(event_times, dtype=float)
+    cam1_onsets = np.asarray(cam1_onsets, dtype=float)
+
+    if cam1_onsets.size < 2:
+        raise ValueError("cam1_onsets must have at least 2 timestamps.")
+
+    idx_right = np.searchsorted(cam1_onsets, event_times, side="left")
+    idx_right = np.clip(idx_right, 1, cam1_onsets.size - 1)
+    idx_left = idx_right - 1
+
+    dist_left = np.abs(event_times - cam1_onsets[idx_left])
+    dist_right = np.abs(cam1_onsets[idx_right] - event_times)
+    choose_right = dist_right < dist_left
+
+    return np.where(choose_right, idx_right, idx_left).astype(int)
+
+
 def _extract_single_snip(vector, center_frame, pre_bins, post_bins):
     """Extract one fixed-length snip and pad with NaN when near edges."""
     start = center_frame - pre_bins
@@ -51,15 +103,32 @@ def _extract_single_snip(vector, center_frame, pre_bins, post_bins):
     return out
 
 
-def make_simba_snips(probability_vector, solenoid_ts, fps=10, pre_bins=50, post_bins=150):
+def make_simba_snips(
+    probability_vector,
+    solenoid_ts,
+    fps=10,
+    pre_bins=50,
+    post_bins=150,
+    cam1_onsets=None,
+):
     """Create TTL-aligned Simba snips, matching behavior snip convention."""
+    trial_ttls = _get_trial_ttls(solenoid_ts)
+
+    if cam1_onsets is None:
+        center_frames = (trial_ttls * fps).astype(int)
+    else:
+        center_frames = _map_tdt_times_to_nearest_frame_indices(trial_ttls, cam1_onsets)
+
+    # Clip frame centers to available Simba vector range.
+    max_idx = max(len(probability_vector) - 1, 0)
+    center_frames = np.clip(center_frames, 0, max_idx)
+
     snips = []
-    for i in range(len(solenoid_ts) - 1):
-        frame_on = int(solenoid_ts[i] * fps)
+    for frame_on in center_frames:
         snips.append(
             _extract_single_snip(
                 probability_vector,
-                center_frame=frame_on,
+                center_frame=int(frame_on),
                 pre_bins=pre_bins,
                 post_bins=post_bins,
             )
@@ -79,6 +148,7 @@ def get_shifted_snip_means(
     post_bins=150,
     shift_frames=300,
     n_shuffles=1000,
+    cam1_onsets=None,
 ):
     """Generate null-distribution snip means by circularly shifting the vector."""
     shifted = np.asarray(probability_vector, dtype=float).copy()
@@ -92,6 +162,7 @@ def get_shifted_snip_means(
             fps=fps,
             pre_bins=pre_bins,
             post_bins=post_bins,
+            cam1_onsets=cam1_onsets,
         )
         shifted_means.append(np.nanmean(snips, axis=0))
 
@@ -102,6 +173,28 @@ def baseline_simba_snips(real_snips, shifted_means):
     """Subtract global shuffle mean from each real snip (notebook behavior)."""
     baseline = float(np.nanmean(shifted_means))
     return real_snips - baseline
+
+
+def get_time_above_simba_ci(
+    real_snips,
+    shifted_means,
+    percentile=97.5,
+    start_bin=50,
+    end_bin=150,
+):
+    """Calculate per-trial proportion of bins above the shuffled upper CI bound."""
+    threshold = float(np.nanpercentile(shifted_means, percentile))
+    proportions = []
+
+    for snip in np.asarray(real_snips, dtype=float):
+        window = np.asarray(snip[start_bin:end_bin], dtype=float)
+        valid = window[~np.isnan(window)]
+        if valid.size == 0:
+            proportions.append(np.nan)
+        else:
+            proportions.append(np.mean(valid > threshold))
+
+    return np.asarray(proportions, dtype=float), threshold
 
 
 def count_bins_above_threshold(snips, threshold, start_bin=50, end_bin=150):

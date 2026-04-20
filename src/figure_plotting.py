@@ -114,6 +114,29 @@ def get_heatmap_data(snips, x_array, condition, infusiontype):
         
     return np.array(heatmap_data)
 
+def get_heatmap_data_by_rat(snips, x_array, condition, infusiontype):
+    """
+    Extract snips for a specific condition and infusion type, averaged by trial.
+    
+    Creates a 2D array where each row is a trial with the trial's average across all samples.
+    
+    :param snips: 2D array of snips (samples x timepoints)
+    :param x_array: DataFrame with trial metadata (must have columns: condition, infusiontype, trial)
+    :param condition: "replete" or "deplete"
+    :param infusiontype: "10NaCl" or "45NaCl"
+    :return: 2D array of trial-averaged snips (trials x timepoints)
+    """
+    query_string = "condition == @condition & infusiontype == @infusiontype"
+    
+    heatmap_data = []
+    df = x_array.query(query_string)
+    for id in df.id.unique():
+        tmp_snips = snips[x_array.query(query_string + " & id == @id").index]
+        mean_snip = np.nanmean(tmp_snips, axis=0)
+        heatmap_data.append(mean_snip)
+        
+    return np.array(heatmap_data)
+
 
 def get_mean_snips(snips, x_array, condition):
     """
@@ -151,6 +174,14 @@ def get_auc(snips, start_bin=50, end_bin=150):
         auc.append(np.trapezoid(snip[start_bin:end_bin]))
     return np.array(auc)
 
+def get_trial_data_by_rat(snips, x_array, condition, infusiontype):
+
+    query_string = "condition == @condition & infusiontype == @infusiontype"
+
+    trial_data = []
+    for id in x_array.query(query_string).id.unique():
+        trial_data.append(x_array.query(query_string + " & id == @id").mean_simba.values)  # Get index of first sample for this animal
+    return np.array(trial_data)
 
 # ──────────────────────────────────────────────────────────────────────
 # Figure Initialization Functions
@@ -222,11 +253,12 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
         # Draw infusion window indicator bar at bottom of heatmap
         ax.plot([50, 150], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
         
+        
     ax.set_xticks([])
     ax.set_yticks([])
 
 
-def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=False):
+def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, yscalebar=None, xscalebar=False, fill_epoch=None):
     """
     Plot time series snips with error envelopes for two infusion types.
     
@@ -238,7 +270,7 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
     :param colors_10: color for 10NaCl line
     :param colors_45: color for 45NaCl line
     :param ylims: [ymin, ymax] limits for y-axis
-    :param scalebar: if True, draw a 1-unit scale bar at top-left
+    :param scalebar: if not None, use the provided values to draw a scale bar on the left
     """
     for snips, col in zip([snips_10, snips_45], [colors_10, colors_45]):
         x = np.arange(snips.shape[1]) / 10  # Convert bins to seconds
@@ -257,14 +289,18 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, scalebar=Fal
     ax.set_ylim(ylims)
     
     # Time scale bar (5 seconds at bottom-right)
-    bar_y = ylims[0] + (ylims[1] - ylims[0]) * 0.05  # 5% above bottom of plot
-    ax.plot([15, 20], [bar_y, bar_y], color="black", lw=2, alpha=0.5, clip_on=False)
-    ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
+    if xscalebar:
+        bar_y = ylims[0] + (ylims[1] - ylims[0]) * 0.05  # 5% above bottom of plot
+        ax.plot([15, 20], [bar_y, bar_y], color="black", lw=2, alpha=0.2, clip_on=False)
+    # ax.text(17.5, bar_y - (ylims[1] - ylims[0]) * 0.08, "5 s", ha="center", va="top", fontsize=9)
     
     # Value scale bar (only for deplete, typically)
-    if scalebar:
-        ax.plot([0, 0], [1, 2], color="black", lw=2, alpha=0.5, clip_on=False)
+    if yscalebar is not None:
+        ax.plot([0, 0], [yscalebar[0], yscalebar[1]], color="black", lw=2, alpha=0.2, clip_on=False)
 
+    if fill_epoch is not None:
+        ax.axvspan(fill_epoch[0], fill_epoch[1], color="red", alpha=0.1, zorder=-10)
+        
 
 def plot_lag_peak_sharpness(
     ax,
@@ -304,7 +340,15 @@ def plot_lag_peak_sharpness(
         )
 
 
-def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
+def plot_auc_summary(
+    aucs,
+    colors,
+    figsize=(2.2, 2.2),
+    ylabel="AUC",
+    sex_groups=None,
+    sex_markers=None,
+    add_sex_legend=False,
+):
     """
     Create a bar plot with AUC summary and individual data points overlaid.
     
@@ -313,14 +357,19 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     :param colors: List of 4 colors for [rep_10, rep_45, dep_10, dep_45]
     :param figsize: Figure size (width, height)
     :param ylabel: Label for y-axis
+    :param sex_groups: Optional nested list matching aucs shape with per-point sex labels
+                      (e.g., [[sex_rep_10, sex_rep_45], [sex_dep_10, sex_dep_45]])
+    :param sex_markers: Optional dict mapping sex label to marker (default: {"M": "^", "F": "o"})
+    :param add_sex_legend: If True and sex_groups provided, add a marker legend
     :return: (fig, ax) tuple
     """
     f, ax = plt.subplots(figsize=figsize,
-                         gridspec_kw={"left": 0.3, "right": 0.95, "top": 0.95, "bottom": 0.2})
+                         gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.95, "bottom": 0.2})
 
     barx = [1, 2]
     barwidth = 0.35
     spacer = 0.2
+    jitter_k = 0.03  # Jitter factor for individual points
 
     # Plot bars (means)
     ax.bar(barx[0] - spacer, np.mean(aucs[0][0]), color=colors[0], width=barwidth)
@@ -328,29 +377,81 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     ax.bar(barx[1] - spacer, np.mean(aucs[1][0]), color=colors[2], width=barwidth)
     ax.bar(barx[1] + spacer, np.mean(aucs[1][1]), color=colors[3], width=barwidth)
 
-    # Draw lines connecting paired values (10NaCl to 45NaCl within each condition)
-    # Replete: connect bars 0 and 1
-    for i in range(len(aucs[0][0])):
-        ax.plot([barx[0] - spacer, barx[0] + spacer], 
-                [aucs[0][0][i], aucs[0][1][i]], 
-                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
-    
-    # Deplete: connect bars 2 and 3
-    for i in range(len(aucs[1][0])):
-        ax.plot([barx[1] - spacer, barx[1] + spacer], 
-                [aucs[1][0][i], aucs[1][1][i]], 
-                color='gray', alpha=0.3, linewidth=0.5, zorder=1)
+    if sex_markers is None:
+        sex_markers = {"M": "^", "F": "o"}
 
-    # Overlay individual points
-    ax.scatter([barx[0] - spacer]*len(aucs[0][0]), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[0] + spacer]*len(aucs[0][1]), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[1] - spacer]*len(aucs[1][0]), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
-    ax.scatter([barx[1] + spacer]*len(aucs[1][1]), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
+    if sex_groups is None:
+        # Overlay individual points (single marker style)
+        ax.scatter([barx[0] - spacer]*len(aucs[0][0]) + np.random.normal(0, jitter_k, len(aucs[0][0])), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
+        ax.scatter([barx[0] + spacer]*len(aucs[0][1]) + np.random.normal(0, jitter_k, len(aucs[0][1])), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
+        ax.scatter([barx[1] - spacer]*len(aucs[1][0]) + np.random.normal(0, jitter_k, len(aucs[1][0])), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
+        ax.scatter([barx[1] + spacer]*len(aucs[1][1]) + np.random.normal(0, jitter_k, len(aucs[1][1])), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
+    else:
+        group_meta = [
+            (barx[0] - spacer, aucs[0][0], colors[0], 0.5, sex_groups[0][0]),
+            (barx[0] + spacer, aucs[0][1], colors[1], 0.5, sex_groups[0][1]),
+            (barx[1] - spacer, aucs[1][0], colors[2], 0.8, sex_groups[1][0]),
+            (barx[1] + spacer, aucs[1][1], colors[3], 0.5, sex_groups[1][1]),
+        ]
+
+        for xpos, yvals, edge_col, alpha, sex_vals in group_meta:
+            yvals = np.asarray(yvals)
+            sex_vals = np.asarray(sex_vals)
+            if len(yvals) != len(sex_vals):
+                raise ValueError("sex_groups must match auc lengths for each subgroup")
+
+            xvals = np.full(len(yvals), xpos) + np.random.normal(0, jitter_k, len(yvals))
+            for sex_label, marker in sex_markers.items():
+                mask = sex_vals == sex_label
+                if np.any(mask):
+                    ax.scatter(
+                        xvals[mask],
+                        yvals[mask],
+                        marker=marker,
+                        facecolors="white",
+                        edgecolors=edge_col,
+                        alpha=alpha,
+                        s=30,
+                        zorder=2,
+                    )
+
+            # Fallback marker for any unexpected/missing sex labels
+            known_labels = np.array(list(sex_markers.keys()), dtype=object)
+            unknown_mask = ~np.isin(sex_vals, known_labels)
+            if np.any(unknown_mask):
+                ax.scatter(
+                    xvals[unknown_mask],
+                    yvals[unknown_mask],
+                    marker="o",
+                    facecolors="white",
+                    edgecolors=edge_col,
+                    alpha=alpha,
+                    s=30,
+                    zorder=2,
+                )
 
     # Styling
     sns.despine(ax=ax, top=True, right=True, left=False, bottom=True)
     ax.set_xticks([])
     ax.set_ylabel(ylabel, fontsize=10)
+
+    if sex_groups is not None and add_sex_legend:
+        legend_handles = []
+        legend_labels = []
+        for sex_label, marker in sex_markers.items():
+            handle = plt.Line2D(
+                [0],
+                [0],
+                marker=marker,
+                color="none",
+                markerfacecolor="white",
+                markeredgecolor="black",
+                markersize=5,
+                linestyle="None",
+            )
+            legend_handles.append(handle)
+            legend_labels.append("Male" if sex_label == "M" else "Female" if sex_label == "F" else str(sex_label))
+        ax.legend(legend_handles, legend_labels, frameon=False, fontsize=8, loc="upper right")
     
     return f, ax
 
@@ -509,6 +610,118 @@ def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     
     return f
 
+def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :return: Figure object
+    """
+    f, ax = plt.subplots(figsize=(2.2, 1.8),
+                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
+
+    ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
+    ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
+
+    r, p = draw_regression_line(inf10, ax, col10)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 1.4, f"0.10 M: r={r:.2f}, {p}", color=col10, fontsize=8,
+            va="bottom", ha="left")
+    
+    r, p = draw_regression_line(inf45, ax, col45)
+    if p < 0.001:
+        p = "p<0.001"
+    else:
+        p = f"p={p:.3f}"
+    ax.text(0, 1.2, f"0.45 M: r={r:.2f}, {p}", color=col45, fontsize=8,
+            va="bottom", ha="left")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-1, 1])
+  
+    if yaxis:
+        ax.set_yticks([-1, 0, 1])
+        ax.set_ylabel("Appetitive Probability")
+    else:
+        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
+
+    ax.set_xticks([0, 10, 20, 30, 40, 49], labels=["0", "10", "20", "30", "40", "50"])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    return f
+
+def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
+    """
+    Create a correlation plot showing AUC values across trials for two infusion types.
+    
+    :param inf10: Array of AUC values for 0.10M infusion
+    :param inf45: Array of AUC values for 0.45M infusion
+    :param col10: Color for 0.10M data points and fit line
+    :param col45: Color for 0.45M data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show tick marks only
+    :param fit: Fit type ("linear" or "sigmoid")
+    :param return_stats: If True, return (figure, r_value, p_value); otherwise return figure only
+    :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
+    """
+    f, ax = plt.subplots(figsize=(1.3, 1.8),
+                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
+
+    x = np.arange(len(inf))
+    ax.scatter(x, inf, color=color, alpha=0.3)
+    r_value, p_value = stats.linregress(x, inf)[2:4]
+
+    if fit == "linear":
+        draw_regression_line(inf, ax, color)
+        
+    elif fit == "sigmoid":
+        from scipy.optimize import curve_fit
+
+        def _sigmoid_model(x, L, k, x0, b):
+            z = np.clip(-k * (x - x0), -60, 60)
+            return L / (1 + np.exp(z)) + b
+
+        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _sigmoid_model(x_fit, *popt)
+        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+
+    if p_value < 0.001:
+        p_text = "p<0.001"
+    else:
+        p_text = f"p={p_value:.3f}"
+    ax.text(25, 1.4, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+            va="bottom", ha="center")
+
+    sns.despine(ax=ax, offset=2)
+
+    ax.set_ylim([-1, 1.3])
+  
+    if yaxis:
+        ax.set_yticks([-1, 0, 1])
+        ax.set_ylabel("Appetitive Probability")
+    else:
+        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
+
+    ax.set_xticks([0, 49])
+    ax.set_xlabel("Trial")
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+    
+    if return_stats:
+        return f, r_value, p_value
+    return f
+
 def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
@@ -520,8 +733,8 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     :param yaxis: If True, show y-axis labels; if False, show tick marks only
     :return: Figure object
     """
-    f, ax = plt.subplots(figsize=(1.8, 1.8),
-                         gridspec_kw={"left": 0.28, "right": 0.9, "top": 0.85, "bottom": 0.24})
+    f, ax = plt.subplots(figsize=(2.2, 1.8),
+                         gridspec_kw={"left": 0.33, "right": 0.85, "top": 0.85, "bottom": 0.24})
 
     ax.scatter(np.arange(len(inf10)), inf10, color=col10, alpha=0.5)
     ax.scatter(np.arange(len(inf45)), inf45, color=col45, alpha=0.5)
@@ -558,6 +771,73 @@ def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
     return f
+
+
+def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", return_stats=False, print_stats=True, ylim=None):
+    """
+    Create a one-group correlation plot for dopamine (AUC) values across trials.
+
+    :param inf: Array of dopamine (AUC) values for a single group
+    :param color: Color for data points and fit line
+    :param yaxis: If True, show y-axis labels; if False, show minimal tick labels
+    :param fit: Fit type ("linear" or "sigmoid")
+    :param return_stats: If True, return (figure, r_value, p_value); otherwise return figure only
+    :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
+    """
+    f, ax = plt.subplots(figsize=(1.3, 1.8),
+                         gridspec_kw={"left": 0.43, "right": 0.90, "top": 0.85, "bottom": 0.24})
+
+    x = np.arange(len(inf))
+    ax.scatter(x, inf, color=color, alpha=0.3)
+    r_value, p_value = stats.linregress(x, inf)[2:4]
+
+    if fit == "linear":
+        draw_regression_line(inf, ax, color)
+
+    elif fit == "sigmoid":
+        from scipy.optimize import curve_fit
+
+        def _sigmoid_model(x, L, k, x0, b):
+            z = np.clip(-k * (x - x0), -60, 60)
+            return L / (1 + np.exp(z)) + b
+
+        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[250, 0.1, 25, -60], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _sigmoid_model(x_fit, *popt)
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
+
+    if print_stats:
+        if p_value < 0.001:
+            p_text = "p<0.001"
+        else:
+            p_text = f"p={p_value:.3f}"
+        ax.text(20, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+                va="bottom", ha="center")
+
+    sns.despine(ax=ax, offset=2)
+
+    if yaxis:
+        ax.set_yticks([-50, 0, 50, 100, 150])
+        ax.set_ylabel("Dopamine (AUC)")
+    else:
+        ax.set_yticks([-50, 0, 50, 100, 150], labels=["", "", "", "", ""])
+        
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    else:
+        ax.set_ylim([-65, 190])
+
+    ax.set_xticks([0, 49])
+    ax.set_xlabel("Trial")
+    ax.set_xlim([-5, 50])
+
+    ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
+
+    if return_stats:
+        return f, r_value, p_value
+    
+    return f, ax
 
 
 def plot_lag_histogram(
