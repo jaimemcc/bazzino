@@ -340,7 +340,15 @@ def plot_lag_peak_sharpness(
         )
 
 
-def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
+def plot_auc_summary(
+    aucs,
+    colors,
+    figsize=(2.2, 2.2),
+    ylabel="AUC",
+    sex_groups=None,
+    sex_markers=None,
+    add_sex_legend=False,
+):
     """
     Create a bar plot with AUC summary and individual data points overlaid.
     
@@ -349,6 +357,10 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     :param colors: List of 4 colors for [rep_10, rep_45, dep_10, dep_45]
     :param figsize: Figure size (width, height)
     :param ylabel: Label for y-axis
+    :param sex_groups: Optional nested list matching aucs shape with per-point sex labels
+                      (e.g., [[sex_rep_10, sex_rep_45], [sex_dep_10, sex_dep_45]])
+    :param sex_markers: Optional dict mapping sex label to marker (default: {"M": "^", "F": "o"})
+    :param add_sex_legend: If True and sex_groups provided, add a marker legend
     :return: (fig, ax) tuple
     """
     f, ax = plt.subplots(figsize=figsize,
@@ -365,16 +377,81 @@ def plot_auc_summary(aucs, colors, figsize=(2.2, 2.2), ylabel="AUC"):
     ax.bar(barx[1] - spacer, np.mean(aucs[1][0]), color=colors[2], width=barwidth)
     ax.bar(barx[1] + spacer, np.mean(aucs[1][1]), color=colors[3], width=barwidth)
 
-    # Overlay individual points
-    ax.scatter([barx[0] - spacer]*len(aucs[0][0]) + np.random.normal(0, jitter_k, len(aucs[0][0])), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[0] + spacer]*len(aucs[0][1]) + np.random.normal(0, jitter_k, len(aucs[0][1])), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
-    ax.scatter([barx[1] - spacer]*len(aucs[1][0]) + np.random.normal(0, jitter_k, len(aucs[1][0])), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
-    ax.scatter([barx[1] + spacer]*len(aucs[1][1]) + np.random.normal(0, jitter_k, len(aucs[1][1])), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
+    if sex_markers is None:
+        sex_markers = {"M": "^", "F": "o"}
+
+    if sex_groups is None:
+        # Overlay individual points (single marker style)
+        ax.scatter([barx[0] - spacer]*len(aucs[0][0]) + np.random.normal(0, jitter_k, len(aucs[0][0])), aucs[0][0], facecolors="white", edgecolors=colors[0], alpha=0.5, s=30, zorder=2)
+        ax.scatter([barx[0] + spacer]*len(aucs[0][1]) + np.random.normal(0, jitter_k, len(aucs[0][1])), aucs[0][1], facecolors="white", edgecolors=colors[1], alpha=0.5, s=30, zorder=2)
+        ax.scatter([barx[1] - spacer]*len(aucs[1][0]) + np.random.normal(0, jitter_k, len(aucs[1][0])), aucs[1][0], facecolors="white", edgecolors=colors[2], alpha=0.8, s=30, zorder=2)
+        ax.scatter([barx[1] + spacer]*len(aucs[1][1]) + np.random.normal(0, jitter_k, len(aucs[1][1])), aucs[1][1], facecolors="white", edgecolors=colors[3], alpha=0.5, s=30, zorder=2)
+    else:
+        group_meta = [
+            (barx[0] - spacer, aucs[0][0], colors[0], 0.5, sex_groups[0][0]),
+            (barx[0] + spacer, aucs[0][1], colors[1], 0.5, sex_groups[0][1]),
+            (barx[1] - spacer, aucs[1][0], colors[2], 0.8, sex_groups[1][0]),
+            (barx[1] + spacer, aucs[1][1], colors[3], 0.5, sex_groups[1][1]),
+        ]
+
+        for xpos, yvals, edge_col, alpha, sex_vals in group_meta:
+            yvals = np.asarray(yvals)
+            sex_vals = np.asarray(sex_vals)
+            if len(yvals) != len(sex_vals):
+                raise ValueError("sex_groups must match auc lengths for each subgroup")
+
+            xvals = np.full(len(yvals), xpos) + np.random.normal(0, jitter_k, len(yvals))
+            for sex_label, marker in sex_markers.items():
+                mask = sex_vals == sex_label
+                if np.any(mask):
+                    ax.scatter(
+                        xvals[mask],
+                        yvals[mask],
+                        marker=marker,
+                        facecolors="white",
+                        edgecolors=edge_col,
+                        alpha=alpha,
+                        s=30,
+                        zorder=2,
+                    )
+
+            # Fallback marker for any unexpected/missing sex labels
+            known_labels = np.array(list(sex_markers.keys()), dtype=object)
+            unknown_mask = ~np.isin(sex_vals, known_labels)
+            if np.any(unknown_mask):
+                ax.scatter(
+                    xvals[unknown_mask],
+                    yvals[unknown_mask],
+                    marker="o",
+                    facecolors="white",
+                    edgecolors=edge_col,
+                    alpha=alpha,
+                    s=30,
+                    zorder=2,
+                )
 
     # Styling
     sns.despine(ax=ax, top=True, right=True, left=False, bottom=True)
     ax.set_xticks([])
     ax.set_ylabel(ylabel, fontsize=10)
+
+    if sex_groups is not None and add_sex_legend:
+        legend_handles = []
+        legend_labels = []
+        for sex_label, marker in sex_markers.items():
+            handle = plt.Line2D(
+                [0],
+                [0],
+                marker=marker,
+                color="none",
+                markerfacecolor="white",
+                markeredgecolor="black",
+                markersize=5,
+                linestyle="None",
+            )
+            legend_handles.append(handle)
+            legend_labels.append("Male" if sex_label == "M" else "Female" if sex_label == "F" else str(sex_label))
+        ax.legend(legend_handles, legend_labels, frameon=False, fontsize=8, loc="upper right")
     
     return f, ax
 
