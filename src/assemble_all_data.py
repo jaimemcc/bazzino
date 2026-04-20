@@ -688,7 +688,7 @@ def cluster_photometry(snips_photo, x_array, params):
     # Final clustering with chosen n_clusters
     model = SpectralClustering(
         # n_clusters=n_clusters,
-        n_clusters=2,
+        n_clusters=2, # Force 2 clusters for better interpretability, silhouette is almost identical to n=4
         affinity=params["clustering_affinity"],
         assign_labels=params["clustering_assign_labels"],
         random_state=123,

@@ -71,6 +71,7 @@ FIGSFOLDER = Path("../paper/figs/panels")
 
 # Ensure figures folder exists
 FIGSFOLDER.mkdir(parents=True, exist_ok=True)
+RESULTSFOLDER.mkdir(parents=True, exist_ok=True)
 
 # ──────────────────────────────────────────────────────────────────────
 # Visualization Parameters
