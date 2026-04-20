@@ -251,16 +251,14 @@ def make_heatmap(data, ax, vlim, cbar_ax=None, inf_bar=False, cmap=None):
     
     if inf_bar:
         # Draw infusion window indicator bar at bottom of heatmap
-        ax.plot([0, 50], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
         ax.plot([50, 150], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
-        ax.plot([150, 250], [-3, -3], color="black", lw=2, alpha=0.5, clip_on=False)
         
         
     ax.set_xticks([])
     ax.set_yticks([])
 
 
-def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, yscalebar=None, xscalebar=False):
+def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, yscalebar=None, xscalebar=False, fill_epoch=None):
     """
     Plot time series snips with error envelopes for two infusion types.
     
@@ -300,6 +298,9 @@ def plot_snips(snips_10, snips_45, ax, colors_10, colors_45, ylims, yscalebar=No
     if yscalebar is not None:
         ax.plot([0, 0], [yscalebar[0], yscalebar[1]], color="black", lw=2, alpha=0.2, clip_on=False)
 
+    if fill_epoch is not None:
+        ax.axvspan(fill_epoch[0], fill_epoch[1], color="red", alpha=0.1, zorder=-10)
+        
 
 def plot_lag_peak_sharpness(
     ax,
