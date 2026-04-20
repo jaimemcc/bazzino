@@ -826,7 +826,7 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
     if ylim is not None:
         ax.set_ylim(ylim)
     else:
-        ax.set_ylim([-65, 180])
+        ax.set_ylim([-65, 190])
 
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
