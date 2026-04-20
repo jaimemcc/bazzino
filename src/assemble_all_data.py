@@ -51,6 +51,7 @@ from extract_behav_parameters import (
 )
 from extract_simba import (
     read_simba_probability,
+    get_cam1_onsets_for_stub,
     make_simba_snips,
     get_shifted_snip_means,
     baseline_simba_snips,
@@ -68,8 +69,8 @@ PARAMS = {
     "tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
-    "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
-    #"simba_folder": Path("C:/Users/jmc010/Data/bazzino/Output_all_animals_appetitive"), #laptop
+    # "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
+    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/simba"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -85,6 +86,7 @@ PARAMS = {
     # ── SIMBA parameters ──
     "simba_probability_column": "Probability_Appetitive",
     "simba_fps": 10,
+    "simba_use_cam1_timestamps": True,
     "simba_pre_bins": 50,
     "simba_post_bins": 150,
     "simba_use_shifted_baseline": False,
@@ -138,9 +140,9 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": True,          # Skip Simba extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+    "cache_simba": False,          # Skip Simba extraction, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -486,12 +488,22 @@ def assemble_simba(params):
             )
 
             solenoid_ts = get_ttls(stub, data_folder)
+            cam1_onsets = None
+            alignment_method = "fps"
+            if params.get("simba_use_cam1_timestamps", True):
+                try:
+                    cam1_onsets = get_cam1_onsets_for_stub(stub, params["tank_folder"])
+                    alignment_method = "cam1"
+                except Exception as cam_exc:
+                    print(f"Cam1 unavailable, falling back to fps ({cam_exc})", end="; ")
+
             snips = make_simba_snips(
                 prob_vec,
                 solenoid_ts,
                 fps=params["simba_fps"],
                 pre_bins=params["simba_pre_bins"],
                 post_bins=params["simba_post_bins"],
+                cam1_onsets=cam1_onsets,
             )
 
             shifted_means = get_shifted_snip_means(
@@ -502,6 +514,7 @@ def assemble_simba(params):
                 post_bins=params["simba_post_bins"],
                 shift_frames=params["simba_shift_frames"],
                 n_shuffles=params["simba_n_shuffles"],
+                cam1_onsets=cam1_onsets,
             )
 
             simba_pct_time_above_95ci, simba_ci_upper = get_time_above_simba_ci(
@@ -522,7 +535,10 @@ def assemble_simba(params):
                 snips = (snips - prob_mean) / prob_std
 
             n = len(snips)
-            print(f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f})")
+            print(
+                f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f}, "
+                f"align={alignment_method})"
+            )
             snips_list.append(snips)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
@@ -532,6 +548,7 @@ def assemble_simba(params):
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
                 "simba_pct_time_above_95ci": simba_pct_time_above_95ci * 100.0,
+                "simba_alignment_method": alignment_method,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
