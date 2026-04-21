@@ -11,6 +11,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from scipy import stats
+from scipy.optimize import curve_fit
 
 
 def smooth_array(arr, window_size=5):
@@ -560,6 +561,16 @@ def draw_regression_line(y, ax, color):
     return r_value, p_value
 
 
+def _fit_corr_stats(y_true, y_fit):
+    """Return Pearson r and p between observed data and model predictions."""
+    y_true = np.asarray(y_true, dtype=float)
+    y_fit = np.asarray(y_fit, dtype=float)
+    valid = np.isfinite(y_true) & np.isfinite(y_fit)
+    if valid.sum() < 3:
+        return np.nan, np.nan
+    return stats.pearsonr(y_true[valid], y_fit[valid])
+
+
 def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
@@ -684,7 +695,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         draw_regression_line(inf, ax, color)
         
     elif fit == "sigmoid":
-        from scipy.optimize import curve_fit
+        
 
         def _sigmoid_model(x, L, k, x0, b):
             z = np.clip(-k * (x - x0), -60, 60)
@@ -693,7 +704,22 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
+        y_pred = _sigmoid_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        
+    elif fit == "exponential":
+
+        def _exp_model(x, a, b, c):
+            return a * np.exp(b * x) + c
+
+        popt, _ = curve_fit(_exp_model, x, inf, p0=[1, -0.1, -1], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _exp_model(x_fit, *popt)
+        y_pred = _exp_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
+        print(f"Exponential fit parameters: a={popt[0]:.2f}, b={popt[1]:.2f}, c={popt[2]:.2f}")
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
 
     sns.despine(ax=ax, offset=2)
@@ -807,8 +833,6 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         draw_regression_line(inf, ax, color)
 
     elif fit == "sigmoid":
-        from scipy.optimize import curve_fit
-
         def _sigmoid_model(x, L, k, x0, b):
             z = np.clip(-k * (x - x0), -60, 60)
             return L / (1 + np.exp(z)) + b
@@ -816,6 +840,8 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[250, 0.1, 25, -60], maxfev=10000)
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
+        y_pred = _sigmoid_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
 
