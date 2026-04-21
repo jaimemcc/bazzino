@@ -55,7 +55,6 @@ from extract_simba import (
     make_simba_snips,
     get_shifted_snip_means,
     get_shifted_snip_means_multi_shift,
-    baseline_simba_snips,
     get_time_above_simba_ci,
 )
 
@@ -103,8 +102,8 @@ PARAMS = {
     # - "pct_time_above_ci": legacy metric
     # - "median_balance_score": 2*p(above null median)-1, centered at 0
     # - "mean_zscore_auc": mean z-score in infusion window (session-level z-score)
-    "simba_primary_metric": "pct_time_above_ci",
-    "simba_zscore_to_entire_file": False,
+    "simba_primary_metric": "mean_zscore_auc",
+    "simba_zscore_to_entire_file": True,  # If True, z-score snips using mean/std of the entire probability vector
 
     # ── Photometry parameters ──
     "photo_baseline_seconds": 5,
@@ -487,7 +486,7 @@ def assemble_simba(params):
         pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
     ])
 
-    snips_list, x_list = [], []
+    snips_baseline_list, snips_zscore_list, x_list = [], [], []
 
     def _resolve_shift_pool_frames(local_params):
         fps_local = float(local_params["simba_fps"])
@@ -601,21 +600,25 @@ def assemble_simba(params):
                 simba_primary_metric_value = simba_pct_time_above_95ci
                 simba_primary_metric_name = "simba_pct_time_above_ci"
 
-            if params.get("simba_use_shifted_baseline", True):
-                snips = baseline_simba_snips(snips, shifted_means)
-                
-            if params.get("simba_zscore_to_entire_file", True):
-                # Z-score using mean and std of the entire probability vector
-                prob_mean = np.nanmean(prob_vec)
-                prob_std = np.nanstd(prob_vec)
-                snips = (snips - prob_mean) / prob_std
+            # ── Variant 1: null-median baseline subtracted (units: Δprobability) ──
+            # Subtract the grand mean of all shuffled null snips per bin.
+            null_grand_mean = float(np.nanmean(shifted_means))
+            snips_baseline = np.asarray(snips, dtype=float) - null_grand_mean
+
+            # ── Variant 2: z-scored to entire session file ──
+            # Standardise using the full-session probability vector mean and SD.
+            if prob_std > 0 and not np.isnan(prob_std):
+                snips_zs = (np.asarray(snips, dtype=float) - prob_mean) / prob_std
+            else:
+                snips_zs = np.full_like(snips, np.nan, dtype=float)
 
             n = len(snips)
             print(
                 f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f}, "
                 f"align={alignment_method}, null={null_method}, metric={simba_primary_metric_name})"
             )
-            snips_list.append(snips)
+            snips_baseline_list.append(snips_baseline)
+            snips_zscore_list.append(snips_zs)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
             x_list.append(pd.DataFrame({
@@ -638,10 +641,11 @@ def assemble_simba(params):
         except Exception as e:
             print(f"ERROR: {e}")
 
-    if not snips_list:
+    if not snips_baseline_list:
         raise RuntimeError("No Simba snips were assembled. Check simba_folder and input files.")
 
-    snips_all = np.concatenate(snips_list)
+    snips_baseline_all = np.concatenate(snips_baseline_list)
+    snips_zscore_all = np.concatenate(snips_zscore_list)
     x_all = (
         pd.concat(x_list, ignore_index=True)
         .replace({"condition": _condition_map()})
@@ -658,11 +662,14 @@ def assemble_simba(params):
     x_all = pd.merge(x_all, subjects_df, on="id", how="left")
 
     mask = ~x_all.condition.isin(params["conditions_to_exclude"])
-    snips_all = snips_all[mask.values]
+    snips_baseline_all = snips_baseline_all[mask.values]
+    snips_zscore_all = snips_zscore_all[mask.values]
     x_all = x_all[mask].reset_index(drop=True)
 
-    print(f"  Simba assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
-    return snips_all, x_all
+    print(f"  Simba assembled: {snips_baseline_all.shape[0]} trials, {snips_baseline_all.shape[1]} bins")
+    print(f"    snips_simba_baseline: null-median subtracted (Δprobability)")
+    print(f"    snips_simba_zscore:   z-scored to full session file")
+    return snips_baseline_all, snips_zscore_all, x_all
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -678,6 +685,7 @@ def equalize_datasets(
     snips_movement_raw=None,
     x_simba=None,
     snips_simba=None,
+    snips_simba_zscore=None,
 ):
     """
     Step 3: Make sure photometry and behaviour datasets match row-for-row.
@@ -724,6 +732,8 @@ def equalize_datasets(
         idx_s = merged["_idx_s"].values
         x_simba = x_simba.iloc[idx_s].reset_index(drop=True)
         snips_simba = snips_simba[idx_s]
+        if snips_simba_zscore is not None:
+            snips_simba_zscore = snips_simba_zscore[idx_s]
 
     print(f"  After equalization: {len(x_photo)} trials (photo), {len(x_behav)} trials (behav)")
     if x_simba is not None:
@@ -731,7 +741,7 @@ def equalize_datasets(
     assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
     if x_simba is not None and snips_simba is not None:
         assert len(x_photo) == len(x_simba), "Simba dataset is not aligned!"
-    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba
+    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba, snips_simba_zscore
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1201,15 +1211,20 @@ def run_pipeline(params=None):
     else:
         cached = None
     if cached is not None:
-        snips_simba, x_simba = cached["snips_simba"], cached["x_simba"]
-        print(f"  Simba from cache: {snips_simba.shape[0]} trials")
+        snips_simba_baseline = cached["snips_simba_baseline"]
+        snips_simba_zscore = cached["snips_simba_zscore"]
+        x_simba = cached["x_simba"]
+        print(f"  Simba from cache: {snips_simba_baseline.shape[0]} trials")
     else:
-        snips_simba, x_simba = assemble_simba(params)
-        _save_cache({"snips_simba": snips_simba, "x_simba": x_simba},
-                    simba_cache_path, "simba", params)
+        snips_simba_baseline, snips_simba_zscore, x_simba = assemble_simba(params)
+        _save_cache(
+            {"snips_simba_baseline": snips_simba_baseline,
+             "snips_simba_zscore": snips_simba_zscore,
+             "x_simba": x_simba},
+            simba_cache_path, "simba", params)
 
     # Step 3: Equalize
-    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba = equalize_datasets(
+    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba_baseline, snips_simba_zscore = equalize_datasets(
         x_photo,
         snips_photo,
         x_behav,
@@ -1217,7 +1232,8 @@ def run_pipeline(params=None):
         snips_angvel,
         snips_movement_raw,
         x_simba=x_simba,
-        snips_simba=snips_simba,
+        snips_simba=snips_simba_baseline,
+        snips_simba_zscore=snips_simba_zscore,
     )
     
     # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
@@ -1227,7 +1243,18 @@ def run_pipeline(params=None):
             x_photo[col] = x_behav[col]
 
     if x_simba is not None:
-        simba_cols = ["simba_pct_time_above_95ci"]
+        simba_cols = [
+            "simba_pct_time_above_95ci",
+            "simba_median_balance_score",
+            "simba_median_balance_score_pct",
+            "simba_mean_zscore_auc",
+            "simba_primary_metric_value",
+            "simba_primary_metric_name",
+            "simba_trial_metric_value",
+            "simba_trial_metric_name",
+            "simba_null_method",
+            "simba_alignment_method",
+        ]
         for col in simba_cols:
             if col in x_simba.columns:
                 x_photo[col] = x_simba[col].values
@@ -1237,8 +1264,8 @@ def run_pipeline(params=None):
         # Recompute mean_simba from snips after extraction/equalization so this
         # always refreshes even when Simba snips are loaded from cache.
         s, e = params["auc_start_bin"], params["auc_end_bin"]
-        x_photo["mean_simba"] = get_mean_by_window(snips_simba, start_bin=s, end_bin=e)
-        print(f"  Added mean_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
+        x_photo["mean_simba"] = get_mean_by_window(snips_simba_baseline, start_bin=s, end_bin=e)
+        print(f"  Added mean_simba to x_array using bins {s}:{e} (recomputed from snips_simba_baseline)")
 
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
@@ -1313,7 +1340,9 @@ def run_pipeline(params=None):
     output = {
         "x_array": x_combined,
         "snips_photo": snips_photo,
-        "snips_simba": snips_simba,
+        "snips_simba_baseline": snips_simba_baseline,
+        "snips_simba_zscore": snips_simba_zscore,
+        "snips_simba": snips_simba_baseline,  # backward-compat alias
         "snips_movement": snips_movement,
         "snips_angvel": snips_angvel,
         "pca_transformed": pca_transformed,
@@ -1337,7 +1366,8 @@ def run_pipeline(params=None):
     print("=" * 60)
     print(f"  x_array shape:          {x_combined.shape}")
     print(f"  snips_photo shape:      {snips_photo.shape}")
-    print(f"  snips_simba shape:      {snips_simba.shape}")
+    print(f"  snips_simba_baseline shape: {snips_simba_baseline.shape}")
+    print(f"  snips_simba_zscore shape:   {snips_simba_zscore.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
     print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
