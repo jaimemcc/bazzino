@@ -54,6 +54,7 @@ from extract_simba import (
     get_cam1_onsets_for_stub,
     make_simba_snips,
     get_shifted_snip_means,
+    get_shifted_snip_means_multi_shift,
     baseline_simba_snips,
     get_time_above_simba_ci,
 )
@@ -89,11 +90,21 @@ PARAMS = {
     "simba_use_cam1_timestamps": True,
     "simba_pre_bins": 50,
     "simba_post_bins": 150,
-    "simba_use_shifted_baseline": False,
+    "simba_use_shifted_baseline": True,
     "simba_shift_frames": 300,
+    "simba_null_method": "multi_shift",  # "single_shift" or "multi_shift"
+    # Multi-shift pool chosen from empirically safe offsets (~18-30s at 10 fps)
+    # to avoid preserving trial-locked structure while keeping realistic dynamics.
+    "simba_shift_pool_seconds": [18, 20, 23, 25, 28, 30],
+    "simba_null_random_state": 42,
     "simba_n_shuffles": 100,
-    "simba_ci_percentile": 97.5,
-    "simba_zscore_to_entire_file": True,
+    "simba_ci_percentile": 95,
+    # Primary metric option:
+    # - "pct_time_above_ci": legacy metric
+    # - "median_balance_score": 2*p(above null median)-1, centered at 0
+    # - "mean_zscore_auc": mean z-score in infusion window (session-level z-score)
+    "simba_primary_metric": "pct_time_above_ci",
+    "simba_zscore_to_entire_file": False,
 
     # ── Photometry parameters ──
     "photo_baseline_seconds": 5,
@@ -477,6 +488,17 @@ def assemble_simba(params):
     ])
 
     snips_list, x_list = [], []
+
+    def _resolve_shift_pool_frames(local_params):
+        fps_local = float(local_params["simba_fps"])
+        seconds_pool = np.asarray(local_params.get("simba_shift_pool_seconds", []), dtype=float)
+        seconds_pool = seconds_pool[np.isfinite(seconds_pool)]
+        frames_pool = np.unique(np.round(seconds_pool * fps_local).astype(int))
+        frames_pool = frames_pool[frames_pool != 0]
+        if frames_pool.size == 0:
+            raise ValueError("simba_shift_pool_seconds must provide at least one non-zero shift.")
+        return frames_pool
+
     for _, row in meta_df.iterrows():
         stub = row["Folder"]
         print(f"  Simba: {stub}", end=" ... ")
@@ -506,16 +528,31 @@ def assemble_simba(params):
                 cam1_onsets=cam1_onsets,
             )
 
-            shifted_means = get_shifted_snip_means(
-                prob_vec,
-                solenoid_ts,
-                fps=params["simba_fps"],
-                pre_bins=params["simba_pre_bins"],
-                post_bins=params["simba_post_bins"],
-                shift_frames=params["simba_shift_frames"],
-                n_shuffles=params["simba_n_shuffles"],
-                cam1_onsets=cam1_onsets,
-            )
+            null_method = str(params.get("simba_null_method", "single_shift")).lower()
+            if null_method == "multi_shift":
+                shift_pool_frames = _resolve_shift_pool_frames(params)
+                shifted_means = get_shifted_snip_means_multi_shift(
+                    prob_vec,
+                    solenoid_ts,
+                    fps=params["simba_fps"],
+                    pre_bins=params["simba_pre_bins"],
+                    post_bins=params["simba_post_bins"],
+                    shift_frames_pool=shift_pool_frames,
+                    n_shuffles=params["simba_n_shuffles"],
+                    cam1_onsets=cam1_onsets,
+                    random_state=params.get("simba_null_random_state", None),
+                )
+            else:
+                shifted_means = get_shifted_snip_means(
+                    prob_vec,
+                    solenoid_ts,
+                    fps=params["simba_fps"],
+                    pre_bins=params["simba_pre_bins"],
+                    post_bins=params["simba_post_bins"],
+                    shift_frames=params["simba_shift_frames"],
+                    n_shuffles=params["simba_n_shuffles"],
+                    cam1_onsets=cam1_onsets,
+                )
 
             simba_pct_time_above_95ci, simba_ci_upper = get_time_above_simba_ci(
                 snips,
@@ -525,19 +562,58 @@ def assemble_simba(params):
                 end_bin=params["auc_end_bin"],
             )
 
+            # Median-balance score: centered around zero by construction.
+            # score = 2 * p(above null median) - 1, in [-1, 1].
+            simba_pct_time_above_50ci, _ = get_time_above_simba_ci(
+                snips,
+                shifted_means,
+                percentile=50,
+                start_bin=params["auc_start_bin"],
+                end_bin=params["auc_end_bin"],
+            )
+            simba_median_balance_score = (2.0 * simba_pct_time_above_50ci) - 1.0
+
+            # Mean z-score metric (AUC window), always computed.
+            # Uses full-session probability mean/std, matching current notebook analysis.
+            prob_mean = float(np.nanmean(prob_vec))
+            prob_std = float(np.nanstd(prob_vec))
+            if prob_std <= 0 or np.isnan(prob_std):
+                simba_mean_zscore_auc = np.full(len(snips), np.nan, dtype=float)
+            else:
+                snips_z = (np.asarray(snips, dtype=float) - prob_mean) / prob_std
+                simba_mean_zscore_auc = np.nanmean(
+                    snips_z[:, params["auc_start_bin"]:params["auc_end_bin"]],
+                    axis=1,
+                )
+
+            # Backward compatible fallback for older configs that still use
+            # simba_trial_metric.
+            metric_mode = str(
+                params.get("simba_primary_metric", params.get("simba_trial_metric", "pct_time_above_ci"))
+            ).lower()
+            if metric_mode == "median_balance_score":
+                simba_primary_metric_value = simba_median_balance_score
+                simba_primary_metric_name = "simba_median_balance_score"
+            elif metric_mode == "mean_zscore_auc":
+                simba_primary_metric_value = simba_mean_zscore_auc
+                simba_primary_metric_name = "simba_mean_zscore_auc"
+            else:
+                simba_primary_metric_value = simba_pct_time_above_95ci
+                simba_primary_metric_name = "simba_pct_time_above_ci"
+
             if params.get("simba_use_shifted_baseline", True):
                 snips = baseline_simba_snips(snips, shifted_means)
                 
             if params.get("simba_zscore_to_entire_file", True):
                 # Z-score using mean and std of the entire probability vector
-                prob_mean = np.mean(prob_vec)
-                prob_std = np.std(prob_vec)
+                prob_mean = np.nanmean(prob_vec)
+                prob_std = np.nanstd(prob_vec)
                 snips = (snips - prob_mean) / prob_std
 
             n = len(snips)
             print(
                 f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f}, "
-                f"align={alignment_method})"
+                f"align={alignment_method}, null={null_method}, metric={simba_primary_metric_name})"
             )
             snips_list.append(snips)
 
@@ -548,6 +624,15 @@ def assemble_simba(params):
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
                 "simba_pct_time_above_95ci": simba_pct_time_above_95ci * 100.0,
+                "simba_median_balance_score": simba_median_balance_score,
+                "simba_median_balance_score_pct": simba_median_balance_score * 100.0,
+                "simba_mean_zscore_auc": simba_mean_zscore_auc,
+                "simba_primary_metric_value": simba_primary_metric_value,
+                "simba_primary_metric_name": simba_primary_metric_name,
+                # Backward-compatible aliases
+                "simba_trial_metric_value": simba_primary_metric_value,
+                "simba_trial_metric_name": simba_primary_metric_name,
+                "simba_null_method": null_method,
                 "simba_alignment_method": alignment_method,
             }))
         except Exception as e:

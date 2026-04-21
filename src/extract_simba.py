@@ -150,9 +150,14 @@ def get_shifted_snip_means(
     n_shuffles=1000,
     cam1_onsets=None,
 ):
-    """Generate null-distribution snip means by circularly shifting the vector."""
+    """Generate null-distribution snips by circularly shifting the vector.
+
+    Returns all individual shuffled snips stacked, shape
+    (n_shuffles * n_trials, n_bins), so that per-bin percentile thresholds
+    reflect single-trial variability rather than the variance of trial means.
+    """
     shifted = np.asarray(probability_vector, dtype=float).copy()
-    shifted_means = []
+    all_snips = []
 
     for _ in range(n_shuffles):
         shifted = np.roll(shifted, shift_frames)
@@ -164,37 +169,103 @@ def get_shifted_snip_means(
             post_bins=post_bins,
             cam1_onsets=cam1_onsets,
         )
-        shifted_means.append(np.nanmean(snips, axis=0))
+        all_snips.append(snips)
 
-    return np.asarray(shifted_means, dtype=float)
+    return np.concatenate(all_snips, axis=0)
 
 
-def baseline_simba_snips(real_snips, shifted_means):
-    """Subtract global shuffle mean from each real snip (notebook behavior)."""
-    baseline = float(np.nanmean(shifted_means))
+def get_shifted_snip_means_multi_shift(
+    probability_vector,
+    solenoid_ts,
+    fps=10,
+    pre_bins=50,
+    post_bins=150,
+    shift_frames_pool=(180, 200, 230, 250, 280, 300),
+    n_shuffles=1000,
+    cam1_onsets=None,
+    random_state=None,
+):
+    """Generate null-distribution snips using a pool of circular shifts.
+
+    This is more robust than a single fixed shift when event timing has
+    structure. For each shuffle, one shift is sampled from shift_frames_pool,
+    the full probability vector is circularly shifted by that amount, and
+    TTL-aligned snips are extracted.
+
+    Returns stacked individual shuffled snips with shape
+    (n_shuffles * n_trials, n_bins).
+    """
+    shifts = np.asarray(shift_frames_pool, dtype=int).ravel()
+    shifts = shifts[np.isfinite(shifts)]
+    shifts = shifts[shifts != 0]
+    if shifts.size == 0:
+        raise ValueError("shift_frames_pool must contain at least one non-zero shift.")
+
+    rng = np.random.default_rng(random_state)
+    base = np.asarray(probability_vector, dtype=float)
+    all_snips = []
+
+    for shift in rng.choice(shifts, size=int(n_shuffles), replace=True):
+        shifted = np.roll(base, int(shift))
+        snips = make_simba_snips(
+            shifted,
+            solenoid_ts,
+            fps=fps,
+            pre_bins=pre_bins,
+            post_bins=post_bins,
+            cam1_onsets=cam1_onsets,
+        )
+        all_snips.append(snips)
+
+    return np.concatenate(all_snips, axis=0)
+
+
+def baseline_simba_snips(real_snips, shifted_snips):
+    """Subtract global shuffle mean from each real snip.
+
+    Works with shifted_snips of any shape — the grand mean is the same
+    whether the input is per-shuffle means (n_shuffles, n_bins) or all
+    individual shuffled snips stacked (n_shuffles*n_trials, n_bins).
+    """
+    baseline = float(np.nanmean(shifted_snips))
     return real_snips - baseline
 
 
 def get_time_above_simba_ci(
     real_snips,
-    shifted_means,
+    shifted_snips,
     percentile=97.5,
     start_bin=50,
     end_bin=150,
 ):
-    """Calculate per-trial proportion of bins above the shuffled upper CI bound."""
-    threshold = float(np.nanpercentile(shifted_means, percentile))
-    proportions = []
+    """Calculate per-trial proportion of bins above the shuffled upper CI bound.
 
+    The threshold is computed per-bin from the null distribution of individual
+    shuffled snips (shape: n_shuffles*n_trials, n_bins), so the CI reflects
+    single-trial variability at each timepoint in the infusion window.
+    The returned scalar threshold is the mean across infusion-window bins
+    (for logging only).
+    """
+    # Per-bin threshold computed only over the infusion window
+    threshold_per_bin = np.nanpercentile(
+        np.asarray(shifted_snips, dtype=float)[:, start_bin:end_bin],
+        percentile,
+        axis=0,
+    )  # shape: (end_bin - start_bin,)
+
+    proportions = []
     for snip in np.asarray(real_snips, dtype=float):
         window = np.asarray(snip[start_bin:end_bin], dtype=float)
-        valid = window[~np.isnan(window)]
-        if valid.size == 0:
+        valid_mask = ~np.isnan(window)
+        if not np.any(valid_mask):
             proportions.append(np.nan)
         else:
-            proportions.append(np.mean(valid > threshold))
+            proportions.append(
+                float(np.mean(window[valid_mask] > threshold_per_bin[valid_mask]))
+            )
 
-    return np.asarray(proportions, dtype=float), threshold
+    mean_threshold = float(np.nanmean(threshold_per_bin))
+    return np.asarray(proportions, dtype=float), mean_threshold
 
 
 def count_bins_above_threshold(snips, threshold, start_bin=50, end_bin=150):
