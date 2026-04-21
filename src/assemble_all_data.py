@@ -9,12 +9,12 @@ This script runs the full data pipeline:
     4. Spectral clustering of photometry data (labels 0/1 added to x_array)
     5. Compute cluster distances (clusterness, euclidean diff)
     6. Sigmoidal transition fitting (deplete + 45NaCl only)
-    7. Combine behaviour and photometry x_arrays, realign trials
+        7. Combine behaviour and photometry x_arrays, realign trials
 
 Outputs a single pickle: data/assembled_data.pickle
 containing: x_array, snips_photo, snips_simba_zscore,
             snips_simba_shifted_baseline, snips_simba_raw,
-            snips_movement, fits_df, z_dep45
+            snips_movement, fits_df, fits_df_da, fits_df_behav, z_dep45
 
 Usage:
     python src/assemble_all_data.py
@@ -149,9 +149,9 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": False,          # Skip Simba extraction, load from cache
+    "cache_simba": True,          # Skip Simba extraction, load from cache
     "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -948,6 +948,67 @@ def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60
                 "params": {}, "y_hat": None, "success": False, "note": "fit failed"}
 
 
+def _sigmoid_model(x, L, k, x0, b):
+    """4-parameter sigmoid function used for continuous behavioral fits."""
+    z = np.clip(-k * (x - x0), -60, 60)
+    return L / (1 + np.exp(z)) + b
+
+
+def _sigmoid_quality_checks(x, params, pcov):
+    """Quality checks for continuous sigmoid fits."""
+    if params is None or len(params) != 4 or np.any(~np.isfinite(params)):
+        return False, "fit_failed", {
+            "x0_interior": False,
+            "k_plausible": False,
+            "ci_finite": False,
+            "asymptotes_covered": False,
+        }
+
+    L, k, x0, b = params
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    x_range = max(x_max - x_min, 1.0)
+    edge_margin = 0.15 * x_range
+    x0_interior = (x_min + edge_margin) <= x0 <= (x_max - edge_margin)
+    k_plausible = np.isfinite(k) and (0.02 <= abs(k) <= 2.5)
+
+    ci_finite = False
+    if pcov is not None:
+        diag = np.diag(pcov)
+        if np.all(np.isfinite(diag)) and np.all(diag >= 0):
+            se = np.sqrt(diag)
+            ci_finite = np.all(np.isfinite(se)) and np.all(se > 0)
+
+    amplitude = abs(L)
+    if amplitude < 1e-8:
+        asymptotes_covered = False
+    else:
+        lower_asym = min(b, b + L)
+        upper_asym = max(b, b + L)
+        y_start = _sigmoid_model(np.array([x_min]), L, k, x0, b)[0]
+        y_end = _sigmoid_model(np.array([x_max]), L, k, x0, b)[0]
+
+        tol = 0.2
+        start_low = abs(y_start - lower_asym) / amplitude <= tol
+        start_high = abs(y_start - upper_asym) / amplitude <= tol
+        end_low = abs(y_end - lower_asym) / amplitude <= tol
+        end_high = abs(y_end - upper_asym) / amplitude <= tol
+
+        start_side = "low" if start_low else ("high" if start_high else None)
+        end_side = "low" if end_low else ("high" if end_high else None)
+        asymptotes_covered = (start_side is not None) and (end_side is not None) and (start_side != end_side)
+
+    checks = {
+        "x0_interior": bool(x0_interior),
+        "k_plausible": bool(k_plausible),
+        "ci_finite": bool(ci_finite),
+        "asymptotes_covered": bool(asymptotes_covered),
+    }
+    failed = [name for name, ok in checks.items() if not ok]
+    is_valid = len(failed) == 0
+    reasons = "ok" if is_valid else ";".join(failed)
+    return is_valid, reasons, checks
+
+
 def find_sigmoidal_transitions(x_array, params):
     """
     Step 6: Fit sigmoidal transitions per rat for deplete + 45NaCl.
@@ -987,6 +1048,165 @@ def find_sigmoidal_transitions(x_array, params):
     print(f"  Successful fits: {len(fits_df)} / {len(df_dep_45.id.unique())} rats")
     print(f"  Transition points: {fits_df.x0_orig.round(1).tolist()}")
     return fits_df
+
+
+def find_behavioral_transitions(x_array, params, signal_col="simba_median_balance"):
+    """Fit per-rat continuous sigmoids to a behavioral signal for deplete + 45NaCl."""
+    print(f"  Calculating behavioral transitions from {signal_col}")
+
+    if signal_col not in x_array.columns:
+        print(f"  Behavioral transition column '{signal_col}' not found; skipping behavior fits.")
+        return pd.DataFrame(columns=[
+            "id", "L", "k", "x0_orig", "b", "success", "is_valid", "note",
+            "x0_interior", "k_plausible", "k_negative", "ci_finite", "asymptotes_covered",
+        ])
+
+    cond = params["transition_condition"]
+    inf = params["transition_infusion"]
+    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
+
+    all_fits = []
+    for rat in sorted(df_dep_45.id.unique()):
+        rat_df = (
+            df_dep_45.loc[df_dep_45.id == rat]
+            .sort_values("trial")
+            .copy()
+        )
+
+        y_raw = rat_df[signal_col].to_numpy(dtype=float)
+        finite_mask = np.isfinite(y_raw)
+        x = np.arange(1, len(y_raw) + 1, dtype=float)
+
+        if finite_mask.sum() < 4:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "too_few_points",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+            continue
+
+        x_fit = x[finite_mask]
+        y_fit_raw = y_raw[finite_mask]
+        y_min, y_max = np.nanmin(y_fit_raw), np.nanmax(y_fit_raw)
+        y_range = y_max - y_min
+
+        if y_range < 1e-8:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "no_variation",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+            continue
+
+        y_norm = (y_fit_raw - y_min) / y_range
+        p0 = [1.0, -1.0, float(np.median(x_fit)), 0.0]
+        bounds = (
+            [-np.inf, -np.inf, np.min(x_fit), -np.inf],
+            [np.inf, np.inf, np.max(x_fit), np.inf],
+        )
+
+        try:
+            params_fit, pcov = curve_fit(
+                _sigmoid_model,
+                x_fit,
+                y_norm,
+                p0=p0,
+                bounds=bounds,
+                maxfev=30000,
+            )
+            L, k, x0, b = [float(v) for v in params_fit]
+            _, _, base_checks = _sigmoid_quality_checks(x_fit, params_fit, pcov)
+
+            checks = dict(base_checks)
+            checks["k_plausible"] = True
+            checks["k_negative"] = bool(np.isfinite(k) and (k < 0))
+
+            failed = [name for name, ok in checks.items() if not ok]
+            is_valid = len(failed) == 0
+            note = "ok" if is_valid else ";".join(failed)
+
+            all_fits.append({
+                "id": rat,
+                "L": L,
+                "k": k,
+                "x0_orig": x0,
+                "b": b,
+                "success": True,
+                "is_valid": bool(is_valid),
+                "note": note,
+                "x0_interior": checks["x0_interior"],
+                "k_plausible": checks["k_plausible"],
+                "k_negative": checks["k_negative"],
+                "ci_finite": checks["ci_finite"],
+                "asymptotes_covered": checks["asymptotes_covered"],
+            })
+        except Exception:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "fit_failed",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+
+    fits_df_behav = pd.DataFrame(all_fits)
+    fits_df_behav = fits_df_behav.query("success == True and is_valid == True and x0_orig > 0").copy()
+
+    print(f"  Successful behavioral fits: {len(fits_df_behav)} / {len(df_dep_45.id.unique())} rats")
+    if not fits_df_behav.empty:
+        print(f"  Behavioral transition points: {fits_df_behav.x0_orig.round(1).tolist()}")
+    return fits_df_behav
+
+
+def _build_realigned_trials(df, fits_df, output_col):
+    """Create a trial-aligned column from a transition table."""
+    if fits_df is None or fits_df.empty:
+        return pd.Series(np.nan, index=df.index, name=output_col, dtype=float)
+
+    transitions = (
+        fits_df[["id", "x0_orig"]]
+        .drop_duplicates(subset=["id"])
+        .assign(_transition=lambda frame: frame["x0_orig"].round().astype(int))
+        .set_index("id")["_transition"]
+    )
+
+    aligned = []
+    for _, row in df.iterrows():
+        rat_id = row["id"]
+        if rat_id not in transitions.index:
+            aligned.append(np.nan)
+        else:
+            aligned.append(row["trial"] - int(transitions.loc[rat_id]))
+
+    return pd.Series(aligned, index=df.index, name=output_col, dtype=float)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1087,7 +1307,7 @@ def _drop_legacy_simba_columns(df):
     return df
 
 
-def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw=None):
+def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
     """
@@ -1132,19 +1352,15 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     if time_moving_raw is not None:
         x_combined = x_combined.assign(time_moving_raw=time_moving_raw)
 
-    # Add trial_aligned column for ALL trials (NaN for rats without fits)
-    trial_aligned = []
-    for idx, row in x_combined.iterrows():
-        rat_id = row['id']
-        if rat_id not in fits_df.id.values:
-            # No fit for this rat
-            trial_aligned.append(np.nan)
-        else:
-            # Rat has a fit - calculate relative trial number
-            transition = int(fits_df.query("id == @rat_id").x0_orig.values[0])
-            trial_aligned.append(row['trial'] - transition)
-    
-    x_combined = x_combined.assign(trial_aligned=trial_aligned)
+    realigned_trials_da = _build_realigned_trials(x_combined, fits_df_da, "realigned_trials_da")
+    realigned_trials_behav = _build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
+
+    x_combined = x_combined.assign(
+        realigned_trials_da=realigned_trials_da,
+        realigned_trials_behav=realigned_trials_behav,
+        # Backward-compat alias while notebooks migrate to the clearer DA-specific name.
+        trial_aligned=realigned_trials_da,
+    )
 
     # Now realign the deplete+45NaCl subset (with NaN values dropped)
     cond = params["transition_condition"]
@@ -1152,15 +1368,22 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     z = (
         x_combined
         .query("condition == @cond & infusiontype == @inf")
-        .dropna(subset=['trial_aligned'])
+        .dropna(subset=['realigned_trials_da'])
         .reset_index(drop=True)
     )
 
     print(f"  Combined x_array: {len(x_combined)} trials")
-    print(f"  Added trial_aligned column (NaN for {(x_combined['trial_aligned'].isna()).sum()} trials without fits)")
+    print(
+        f"  Added realigned_trials_da column "
+        f"(NaN for {(x_combined['realigned_trials_da'].isna()).sum()} trials without DA fits)"
+    )
+    print(
+        f"  Added realigned_trials_behav column "
+        f"(NaN for {(x_combined['realigned_trials_behav'].isna()).sum()} trials without behavioral fits)"
+    )
     if time_moving_raw is not None:
         print(f"  Added time_moving_raw column (threshold={params['movement_threshold_raw']} pixels)")
-    print(f"  Realigned deplete+45NaCl subset: {len(z)} trials with valid alignments")
+    print(f"  Realigned deplete+45NaCl subset (DA-aligned): {len(z)} trials with valid alignments")
 
     return x_combined, z
 
@@ -1312,18 +1535,30 @@ def run_pipeline(params=None):
         cached = _load_cache(transitions_cache_path, "transitions")
     else:
         cached = None
-    if cached is not None:
+    if cached is not None and "fits_df" in cached and "fits_df_behav" in cached:
         fits_df = cached["fits_df"]
-        print(f"  Transitions from cache: {len(fits_df)} fits")
+        fits_df_da = cached.get("fits_df_da", fits_df)
+        fits_df_behav = cached["fits_df_behav"]
+        print(f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits")
     else:
         print(f"  Calculating transitions from deterministic clustering (random_state=0)")
-        fits_df = find_sigmoidal_transitions(x_combined, params)
-        print(f"  Calculated {len(fits_df)} transition fits")
-        _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
+        fits_df_da = find_sigmoidal_transitions(x_combined, params)
+        fits_df_behav = find_behavioral_transitions(x_combined, params)
+        fits_df = fits_df_da
+        print(f"  Calculated {len(fits_df_da)} DA transition fits and {len(fits_df_behav)} behavioral transition fits")
+        _save_cache(
+            {"fits_df": fits_df_da, "fits_df_da": fits_df_da, "fits_df_behav": fits_df_behav},
+            transitions_cache_path,
+            "transitions",
+            params,
+        )
+
+    if cached is not None and ("fits_df" not in locals()):
+        fits_df = fits_df_da
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
-        x_combined, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw
+        x_combined, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw
     )
 
     # Create metadata about data processing
@@ -1364,6 +1599,8 @@ def run_pipeline(params=None):
         "snips_angvel": snips_angvel,
         "pca_transformed": pca_transformed,
         "fits_df": fits_df,
+        "fits_df_da": fits_df_da,
+        "fits_df_behav": fits_df_behav,
         "z_dep45": z_dep45,
         "metadata": metadata,
         "params": params,
@@ -1390,6 +1627,8 @@ def run_pipeline(params=None):
     print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
+    print(f"  fits_df_da shape:  {fits_df_da.shape}")
+    print(f"  fits_df_behav shape: {fits_df_behav.shape}")
     print(f"\nData processing metadata:")
     print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
     print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
