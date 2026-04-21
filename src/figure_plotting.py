@@ -174,13 +174,13 @@ def get_auc(snips, start_bin=50, end_bin=150):
         auc.append(np.trapezoid(snip[start_bin:end_bin]))
     return np.array(auc)
 
-def get_trial_data_by_rat(snips, x_array, condition, infusiontype):
+def get_trial_data_by_rat(snips, x_array, condition, infusiontype, simba_col="simba_zscore_mean"):
 
     query_string = "condition == @condition & infusiontype == @infusiontype"
 
     trial_data = []
     for id in x_array.query(query_string).id.unique():
-        trial_data.append(x_array.query(query_string + " & id == @id").mean_simba.values)  # Get index of first sample for this animal
+        trial_data.append(x_array.query(query_string + " & id == @id")[simba_col].values)  # Get index of first sample for this animal
     return np.array(trial_data)
 
 # ──────────────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ def init_heatmap_figure():
     :return: Tuple of (fig, ax1, ax2, cbar_ax)
     """
     f = plt.figure(figsize=(2, 3.5))
-    gs = f.add_gridspec(2, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1])
+    gs = f.add_gridspec(2, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], right=0.85)
     
     ax1 = f.add_subplot(gs[0, 0])
     ax2 = f.add_subplot(gs[1, 0])
@@ -210,7 +210,7 @@ def init_snips_figure():
     :return: Tuple of (fig, ax)
     """
     f = plt.figure(figsize=(2, 2))
-    gs = f.add_gridspec(1, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], bottom=0.2)
+    gs = f.add_gridspec(1, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], bottom=0.2, right=0.85)
     ax = f.add_subplot(gs[0, 0])
     
     return f, ax
@@ -674,7 +674,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
     :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
     """
     f, ax = plt.subplots(figsize=(1.3, 1.8),
-                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
+                         gridspec_kw={"left": 0.45, "right": 0.88, "top": 0.85, "bottom": 0.24})
 
     x = np.arange(len(inf))
     ax.scatter(x, inf, color=color, alpha=0.3)
@@ -716,7 +716,8 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         p_text_y = 0.99
     else:
         p_text_y = ax.get_ylim()[1] * 1.05
-        
+    
+    ax.set_xlim([-5, 53])
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
 
