@@ -660,7 +660,7 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
     
     return f
 
-def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
+def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False, simba_metric=None):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
     
@@ -696,31 +696,42 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
 
-    if p_value < 0.001:
-        p_text = "p<0.001"
-    else:
-        p_text = f"p={p_value:.3f}"
-    ax.text(25, 1.4, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
-            va="bottom", ha="center")
-
     sns.despine(ax=ax, offset=2)
-
-    ax.set_ylim([-1, 1.3])
-  
+    
     if yaxis:
-        ax.set_yticks([-1, 0, 1])
         ax.set_ylabel("Appetitive Probability")
+        
+    if simba_metric == "zscore":
+        ax.set_ylim([-0.12, 0.2])
+        ax.set_yticks([-0.1, 0, 0.1, 0.2])
+        if not yaxis:
+            ax.set_yticklabels(["", "", "", ""])
+        p_text_y = 0.21
+            
+    elif simba_metric == "median":
+        ax.set_ylim([-0.7, 0.9])
+        ax.set_yticks([-0.5, 0, 0.5])
+        if not yaxis:
+            ax.set_yticklabels(["", "", ""])
+        p_text_y = 0.99
     else:
-        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
-
+        p_text_y = ax.get_ylim()[1] * 1.05
+        
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
 
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
+    if p_value < 0.001:
+        p_text = "p<0.001"
+    else:
+        p_text = f"p={p_value:.3f}"
+    ax.text(25, p_text_y, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+            va="bottom", ha="center")
+    
     if return_stats:
         return f, r_value, p_value
-    return f
+    return f, ax
 
 def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     """
