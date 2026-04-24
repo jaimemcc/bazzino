@@ -11,6 +11,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from scipy import stats
+from scipy.optimize import curve_fit
 
 
 def smooth_array(arr, window_size=5):
@@ -174,13 +175,13 @@ def get_auc(snips, start_bin=50, end_bin=150):
         auc.append(np.trapezoid(snip[start_bin:end_bin]))
     return np.array(auc)
 
-def get_trial_data_by_rat(snips, x_array, condition, infusiontype):
+def get_trial_data_by_rat(snips, x_array, condition, infusiontype, simba_col="simba_zscore_mean"):
 
     query_string = "condition == @condition & infusiontype == @infusiontype"
 
     trial_data = []
     for id in x_array.query(query_string).id.unique():
-        trial_data.append(x_array.query(query_string + " & id == @id").mean_simba.values)  # Get index of first sample for this animal
+        trial_data.append(x_array.query(query_string + " & id == @id")[simba_col].values)  # Get index of first sample for this animal
     return np.array(trial_data)
 
 # ──────────────────────────────────────────────────────────────────────
@@ -194,7 +195,7 @@ def init_heatmap_figure():
     :return: Tuple of (fig, ax1, ax2, cbar_ax)
     """
     f = plt.figure(figsize=(2, 3.5))
-    gs = f.add_gridspec(2, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1])
+    gs = f.add_gridspec(2, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], right=0.85)
     
     ax1 = f.add_subplot(gs[0, 0])
     ax2 = f.add_subplot(gs[1, 0])
@@ -210,7 +211,7 @@ def init_snips_figure():
     :return: Tuple of (fig, ax)
     """
     f = plt.figure(figsize=(2, 2))
-    gs = f.add_gridspec(1, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], bottom=0.2)
+    gs = f.add_gridspec(1, 2, hspace=0.1, wspace=0.05, width_ratios=[10, 1], bottom=0.2, right=0.85)
     ax = f.add_subplot(gs[0, 0])
     
     return f, ax
@@ -560,6 +561,16 @@ def draw_regression_line(y, ax, color):
     return r_value, p_value
 
 
+def _fit_corr_stats(y_true, y_fit):
+    """Return Pearson r and p between observed data and model predictions."""
+    y_true = np.asarray(y_true, dtype=float)
+    y_fit = np.asarray(y_fit, dtype=float)
+    valid = np.isfinite(y_true) & np.isfinite(y_fit)
+    if valid.sum() < 3:
+        return np.nan, np.nan
+    return stats.pearsonr(y_true[valid], y_fit[valid])
+
+
 def make_correlation_plot_behav(inf10, inf45, col10, col45, yaxis=False):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
@@ -660,7 +671,7 @@ def make_correlation_plot_simba(inf10, inf45, col10, col45, yaxis=False):
     
     return f
 
-def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False):
+def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", return_stats=False, simba_metric=None):
     """
     Create a correlation plot showing AUC values across trials for two infusion types.
     
@@ -674,7 +685,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
     :return: Figure object, or tuple (figure, r_value, p_value) when return_stats=True
     """
     f, ax = plt.subplots(figsize=(1.3, 1.8),
-                         gridspec_kw={"left": 0.36, "right": 0.85, "top": 0.85, "bottom": 0.24})
+                         gridspec_kw={"left": 0.45, "right": 0.88, "top": 0.85, "bottom": 0.24})
 
     x = np.arange(len(inf))
     ax.scatter(x, inf, color=color, alpha=0.3)
@@ -684,7 +695,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         draw_regression_line(inf, ax, color)
         
     elif fit == "sigmoid":
-        from scipy.optimize import curve_fit
+        
 
         def _sigmoid_model(x, L, k, x0, b):
             z = np.clip(-k * (x - x0), -60, 60)
@@ -693,34 +704,61 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
+        y_pred = _sigmoid_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        
+    elif fit == "exponential":
 
-    if p_value < 0.001:
-        p_text = "p<0.001"
-    else:
-        p_text = f"p={p_value:.3f}"
-    ax.text(25, 1.4, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
-            va="bottom", ha="center")
+        def _exp_model(x, a, b, c):
+            return a * np.exp(b * x) + c
+
+        popt, _ = curve_fit(_exp_model, x, inf, p0=[1, -0.1, -1], maxfev=10000)
+        x_fit = np.linspace(0, len(inf)-1, 100)
+        y_fit = _exp_model(x_fit, *popt)
+        y_pred = _exp_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
+        print(f"Exponential fit parameters: a={popt[0]:.2f}, b={popt[1]:.2f}, c={popt[2]:.2f}")
+        ax.plot(x_fit, y_fit, color=color, lw=1.5)
 
     sns.despine(ax=ax, offset=2)
-
-    ax.set_ylim([-1, 1.3])
-  
+    
     if yaxis:
-        ax.set_yticks([-1, 0, 1])
         ax.set_ylabel("Appetitive Probability")
+        
+    if simba_metric == "zscore":
+        ax.set_ylim([-0.12, 0.2])
+        ax.set_yticks([-0.1, 0, 0.1, 0.2])
+        if not yaxis:
+            ax.set_yticklabels(["", "", "", ""])
+        p_text_y = 0.21
+            
+    elif simba_metric == "median":
+        ax.set_ylim([-0.7, 0.9])
+        ax.set_yticks([-0.5, 0, 0.5])
+        if not yaxis:
+            ax.set_yticklabels(["", "", ""])
+        p_text_y = 0.99
     else:
-        ax.set_yticks([-1, 0, 1], labels=["", "", ""])
-
+        p_text_y = ax.get_ylim()[1] * 1.05
+    
+    ax.set_xlim([-5, 53])
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
 
     ax.axhline(0, color="k", linestyle=":", alpha=0.7, zorder=-20)
     
+    if p_value < 0.001:
+        p_text = "p<0.001"
+    else:
+        p_text = f"p={p_value:.3f}"
+    ax.text(25, p_text_y, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+            va="bottom", ha="center")
+    
     if return_stats:
         return f, r_value, p_value
-    return f
+    return f, ax
 
 def make_correlation_plot_da(inf10, inf45, col10, col45, yaxis=False):
     """
@@ -795,8 +833,6 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         draw_regression_line(inf, ax, color)
 
     elif fit == "sigmoid":
-        from scipy.optimize import curve_fit
-
         def _sigmoid_model(x, L, k, x0, b):
             z = np.clip(-k * (x - x0), -60, 60)
             return L / (1 + np.exp(z)) + b
@@ -804,6 +840,8 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[250, 0.1, 25, -60], maxfev=10000)
         x_fit = np.linspace(0, len(inf)-1, 100)
         y_fit = _sigmoid_model(x_fit, *popt)
+        y_pred = _sigmoid_model(x, *popt)
+        r_value, p_value = _fit_corr_stats(inf, y_pred)
         ax.plot(x_fit, y_fit, color=color, lw=1.5)
         print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
 

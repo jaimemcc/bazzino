@@ -215,24 +215,57 @@ def run_model_fit_comparison(fit_inputs, round_digits=4):
 
 
 def summarize_best_valid_model(fit_results, round_digits=4):
-    """Select best valid model by condition using AICc."""
+    """Select best model by condition with conservative nonlinear gating.
+
+    Default behavior is linear unless a nonlinear model passes all gates:
+    - p-value below threshold
+    - AICc improvement versus linear of at least ``min_delta_aicc``
+    - (sigmoidal only) passes sigmoid quality checks
+    """
+    p_threshold = 0.05
+    min_delta_aicc = 2.0
     summary_rows = []
 
     for condition_label, group in fit_results.groupby("Condition"):
         group = group.copy()
-        group["Is_valid_for_selection"] = np.where(
+        linear_rows = group[group["Model"] == "Linear"]
+        linear_aicc = linear_rows["AICc"].iloc[0] if len(linear_rows) > 0 else np.nan
+
+        group["passes_sigmoid_quality"] = np.where(
             group["Model"] == "Sigmoidal",
             group["Sigmoid_valid"].fillna(False),
             True,
+        )
+        group["passes_p_gate"] = group["p"].notna() & (group["p"] < p_threshold)
+        group["delta_aicc_vs_linear"] = linear_aicc - group["AICc"]
+        group["passes_delta_aicc_gate"] = (
+            group["AICc"].notna()
+            & np.isfinite(linear_aicc)
+            & (group["delta_aicc_vs_linear"] >= min_delta_aicc)
+        )
+
+        is_linear = group["Model"] == "Linear"
+        is_nonlinear = group["Model"].isin(["Exponential", "Sigmoidal"])
+        group["Is_valid_for_selection"] = is_linear | (
+            is_nonlinear
+            & group["passes_sigmoid_quality"]
+            & group["passes_p_gate"]
+            & group["passes_delta_aicc_gate"]
         )
 
         valid_group = group[group["Is_valid_for_selection"] == True]
         if len(valid_group) > 0 and valid_group["AICc"].notna().any():
             best = valid_group.sort_values("AICc", ascending=True).iloc[0]
-            selection_reason = "best_valid_by_AICc"
+            if best["Model"] == "Linear":
+                selection_reason = "linear_default_or_nonlinear_failed_gate"
+            else:
+                selection_reason = "nonlinear_passed_gate_and_best_AICc"
+        elif len(linear_rows) > 0:
+            best = linear_rows.iloc[0]
+            selection_reason = "fallback_linear_missing_AICc"
         else:
             best = group.sort_values("AICc", ascending=True).iloc[0]
-            selection_reason = "fallback_no_valid_model"
+            selection_reason = "fallback_no_linear_available"
 
         summary_rows.append({
             "Condition": condition_label,

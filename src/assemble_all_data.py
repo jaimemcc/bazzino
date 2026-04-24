@@ -9,10 +9,12 @@ This script runs the full data pipeline:
     4. Spectral clustering of photometry data (labels 0/1 added to x_array)
     5. Compute cluster distances (clusterness, euclidean diff)
     6. Sigmoidal transition fitting (deplete + 45NaCl only)
-    7. Combine behaviour and photometry x_arrays, realign trials
+        7. Combine behaviour and photometry x_arrays, realign trials
 
 Outputs a single pickle: data/assembled_data.pickle
-containing: x_array, snips_photo, snips_simba, snips_movement, fits_df, z_dep45
+containing: x_array, snips_photo, snips_simba_zscore,
+            snips_simba_shifted_baseline, snips_simba_raw,
+            snips_movement, fits_df, fits_df_da, fits_df_behav, z_dep45
 
 Usage:
     python src/assemble_all_data.py
@@ -54,7 +56,7 @@ from extract_simba import (
     get_cam1_onsets_for_stub,
     make_simba_snips,
     get_shifted_snip_means,
-    baseline_simba_snips,
+    get_shifted_snip_means_multi_shift,
     get_time_above_simba_ci,
 )
 
@@ -89,11 +91,18 @@ PARAMS = {
     "simba_use_cam1_timestamps": True,
     "simba_pre_bins": 50,
     "simba_post_bins": 150,
-    "simba_use_shifted_baseline": False,
+    "simba_use_shifted_baseline": True,
     "simba_shift_frames": 300,
+    "simba_null_method": "multi_shift",  # "single_shift" or "multi_shift"
+    # Multi-shift pool chosen from empirically safe offsets (~18-30s at 10 fps)
+    # to avoid preserving trial-locked structure while keeping realistic dynamics.
+    "simba_shift_pool_seconds": [18, 20, 23, 25, 28, 30],
+    "simba_null_random_state": 42,
     "simba_n_shuffles": 100,
-    "simba_ci_percentile": 97.5,
-    "simba_zscore_to_entire_file": True,
+    "simba_ci_percentile": 95,
+    # Exclude edge frames when estimating session mean/std for z-scoring.
+    # This helps avoid start/end artifacts dominating normalization.
+    "simba_zscore_edge_exclude_frames": 1800,
 
     # ── Photometry parameters ──
     "photo_baseline_seconds": 5,
@@ -140,9 +149,9 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": False,          # Skip Simba extraction, load from cache
+    "cache_simba": True,          # Skip Simba extraction, load from cache
     "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -476,7 +485,18 @@ def assemble_simba(params):
         pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
     ])
 
-    snips_list, x_list = [], []
+    snips_raw_list, snips_baseline_list, snips_zscore_list, x_list = [], [], [], []
+
+    def _resolve_shift_pool_frames(local_params):
+        fps_local = float(local_params["simba_fps"])
+        seconds_pool = np.asarray(local_params.get("simba_shift_pool_seconds", []), dtype=float)
+        seconds_pool = seconds_pool[np.isfinite(seconds_pool)]
+        frames_pool = np.unique(np.round(seconds_pool * fps_local).astype(int))
+        frames_pool = frames_pool[frames_pool != 0]
+        if frames_pool.size == 0:
+            raise ValueError("simba_shift_pool_seconds must provide at least one non-zero shift.")
+        return frames_pool
+
     for _, row in meta_df.iterrows():
         stub = row["Folder"]
         print(f"  Simba: {stub}", end=" ... ")
@@ -506,18 +526,35 @@ def assemble_simba(params):
                 cam1_onsets=cam1_onsets,
             )
 
-            shifted_means = get_shifted_snip_means(
-                prob_vec,
-                solenoid_ts,
-                fps=params["simba_fps"],
-                pre_bins=params["simba_pre_bins"],
-                post_bins=params["simba_post_bins"],
-                shift_frames=params["simba_shift_frames"],
-                n_shuffles=params["simba_n_shuffles"],
-                cam1_onsets=cam1_onsets,
-            )
+            snips_raw = np.asarray(snips, dtype=float)
 
-            simba_pct_time_above_95ci, simba_ci_upper = get_time_above_simba_ci(
+            null_method = str(params.get("simba_null_method", "single_shift")).lower()
+            if null_method == "multi_shift":
+                shift_pool_frames = _resolve_shift_pool_frames(params)
+                shifted_means = get_shifted_snip_means_multi_shift(
+                    prob_vec,
+                    solenoid_ts,
+                    fps=params["simba_fps"],
+                    pre_bins=params["simba_pre_bins"],
+                    post_bins=params["simba_post_bins"],
+                    shift_frames_pool=shift_pool_frames,
+                    n_shuffles=params["simba_n_shuffles"],
+                    cam1_onsets=cam1_onsets,
+                    random_state=params.get("simba_null_random_state", None),
+                )
+            else:
+                shifted_means = get_shifted_snip_means(
+                    prob_vec,
+                    solenoid_ts,
+                    fps=params["simba_fps"],
+                    pre_bins=params["simba_pre_bins"],
+                    post_bins=params["simba_post_bins"],
+                    shift_frames=params["simba_shift_frames"],
+                    n_shuffles=params["simba_n_shuffles"],
+                    cam1_onsets=cam1_onsets,
+                )
+
+            _, simba_ci_upper = get_time_above_simba_ci(
                 snips,
                 shifted_means,
                 percentile=params["simba_ci_percentile"],
@@ -525,21 +562,59 @@ def assemble_simba(params):
                 end_bin=params["auc_end_bin"],
             )
 
-            if params.get("simba_use_shifted_baseline", True):
-                snips = baseline_simba_snips(snips, shifted_means)
-                
-            if params.get("simba_zscore_to_entire_file", True):
-                # Z-score using mean and std of the entire probability vector
-                prob_mean = np.mean(prob_vec)
-                prob_std = np.std(prob_vec)
-                snips = (snips - prob_mean) / prob_std
+            # Median-balance score: centered around zero by construction.
+            # score = 2 * p(above null median) - 1, in [-1, 1].
+            simba_pct_time_above_50ci, _ = get_time_above_simba_ci(
+                snips,
+                shifted_means,
+                percentile=50,
+                start_bin=params["auc_start_bin"],
+                end_bin=params["auc_end_bin"],
+            )
+            simba_median_balance = (2.0 * simba_pct_time_above_50ci) - 1.0
+
+            # Session-level z-scoring for Simba snips, excluding start/end frames
+            # to reduce edge artifacts in the normalization reference.
+            edge_exclude = int(params.get("simba_zscore_edge_exclude_frames", 0))
+            if edge_exclude > 0 and prob_vec.size > (2 * edge_exclude):
+                prob_reference = np.asarray(prob_vec, dtype=float)[edge_exclude:-edge_exclude]
+            else:
+                prob_reference = np.asarray(prob_vec, dtype=float)
+
+            prob_mean = float(np.nanmean(prob_reference))
+            prob_std = float(np.nanstd(prob_reference))
+
+            # ── Variant 1: null-median baseline subtracted (units: Δprobability) ──
+            # Subtract the grand mean of all shuffled null snips per bin.
+            null_grand_mean = float(np.nanmean(shifted_means))
+            snips_baseline = snips_raw - null_grand_mean
+
+            # ── Variant 2: z-scored to entire session file ──
+            # Standardise using the full-session probability vector mean and SD.
+            if prob_std > 0 and not np.isnan(prob_std):
+                snips_zs = (snips_raw - prob_mean) / prob_std
+            else:
+                snips_zs = np.full_like(snips_raw, np.nan, dtype=float)
+
+            simba_raw_mean = np.nanmean(
+                snips_raw[:, params["auc_start_bin"]:params["auc_end_bin"]],
+                axis=1,
+            )
+
+            # Mean of z-scored snips in infusion window (5-15 s by default).
+            simba_zscore_mean = np.nanmean(
+                snips_zs[:, params["auc_start_bin"]:params["auc_end_bin"]],
+                axis=1,
+            )
 
             n = len(snips)
             print(
                 f"{n} trials ({src_file.name}, upper CI={simba_ci_upper:.3f}, "
-                f"align={alignment_method})"
+                f"align={alignment_method}, null={null_method})"
             )
-            snips_list.append(snips)
+            snips_raw_list.append(snips_raw)
+            snips_baseline_list.append(snips_baseline)
+            snips_zscore_list.append(snips_zs)
 
             infusion_label = "45NaCl" if row["TreatNum"] == 45 else "10NaCl"
             x_list.append(pd.DataFrame({
@@ -547,16 +622,19 @@ def assemble_simba(params):
                 "id": row["Subject"],
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
-                "simba_pct_time_above_95ci": simba_pct_time_above_95ci * 100.0,
-                "simba_alignment_method": alignment_method,
+                "simba_raw_mean": simba_raw_mean,
+                "simba_zscore_mean": simba_zscore_mean,
+                "simba_median_balance": simba_median_balance,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
 
-    if not snips_list:
+    if not snips_baseline_list:
         raise RuntimeError("No Simba snips were assembled. Check simba_folder and input files.")
 
-    snips_all = np.concatenate(snips_list)
+    snips_raw_all = np.concatenate(snips_raw_list)
+    snips_baseline_all = np.concatenate(snips_baseline_list)
+    snips_zscore_all = np.concatenate(snips_zscore_list)
     x_all = (
         pd.concat(x_list, ignore_index=True)
         .replace({"condition": _condition_map()})
@@ -573,11 +651,16 @@ def assemble_simba(params):
     x_all = pd.merge(x_all, subjects_df, on="id", how="left")
 
     mask = ~x_all.condition.isin(params["conditions_to_exclude"])
-    snips_all = snips_all[mask.values]
+    snips_raw_all = snips_raw_all[mask.values]
+    snips_baseline_all = snips_baseline_all[mask.values]
+    snips_zscore_all = snips_zscore_all[mask.values]
     x_all = x_all[mask].reset_index(drop=True)
 
-    print(f"  Simba assembled: {snips_all.shape[0]} trials, {snips_all.shape[1]} bins")
-    return snips_all, x_all
+    print(f"  Simba assembled: {snips_baseline_all.shape[0]} trials, {snips_baseline_all.shape[1]} bins")
+    print("    snips_simba_raw: uncorrected raw Simba probabilities")
+    print("    snips_simba_shifted_baseline: null grand-mean subtracted (delta probability)")
+    print("    snips_simba_zscore: session z-score (edge-trimmed reference)")
+    return snips_raw_all, snips_baseline_all, snips_zscore_all, x_all
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -592,7 +675,9 @@ def equalize_datasets(
     snips_angvel,
     snips_movement_raw=None,
     x_simba=None,
+    snips_simba_raw=None,
     snips_simba=None,
+    snips_simba_zscore=None,
 ):
     """
     Step 3: Make sure photometry and behaviour datasets match row-for-row.
@@ -638,7 +723,11 @@ def equalize_datasets(
     if x_simba is not None and snips_simba is not None:
         idx_s = merged["_idx_s"].values
         x_simba = x_simba.iloc[idx_s].reset_index(drop=True)
+        if snips_simba_raw is not None:
+            snips_simba_raw = snips_simba_raw[idx_s]
         snips_simba = snips_simba[idx_s]
+        if snips_simba_zscore is not None:
+            snips_simba_zscore = snips_simba_zscore[idx_s]
 
     print(f"  After equalization: {len(x_photo)} trials (photo), {len(x_behav)} trials (behav)")
     if x_simba is not None:
@@ -646,7 +735,7 @@ def equalize_datasets(
     assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
     if x_simba is not None and snips_simba is not None:
         assert len(x_photo) == len(x_simba), "Simba dataset is not aligned!"
-    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba
+    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba_raw, snips_simba, snips_simba_zscore
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -859,6 +948,67 @@ def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60
                 "params": {}, "y_hat": None, "success": False, "note": "fit failed"}
 
 
+def _sigmoid_model(x, L, k, x0, b):
+    """4-parameter sigmoid function used for continuous behavioral fits."""
+    z = np.clip(-k * (x - x0), -60, 60)
+    return L / (1 + np.exp(z)) + b
+
+
+def _sigmoid_quality_checks(x, params, pcov):
+    """Quality checks for continuous sigmoid fits."""
+    if params is None or len(params) != 4 or np.any(~np.isfinite(params)):
+        return False, "fit_failed", {
+            "x0_interior": False,
+            "k_plausible": False,
+            "ci_finite": False,
+            "asymptotes_covered": False,
+        }
+
+    L, k, x0, b = params
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    x_range = max(x_max - x_min, 1.0)
+    edge_margin = 0.15 * x_range
+    x0_interior = (x_min + edge_margin) <= x0 <= (x_max - edge_margin)
+    k_plausible = np.isfinite(k) and (0.02 <= abs(k) <= 2.5)
+
+    ci_finite = False
+    if pcov is not None:
+        diag = np.diag(pcov)
+        if np.all(np.isfinite(diag)) and np.all(diag >= 0):
+            se = np.sqrt(diag)
+            ci_finite = np.all(np.isfinite(se)) and np.all(se > 0)
+
+    amplitude = abs(L)
+    if amplitude < 1e-8:
+        asymptotes_covered = False
+    else:
+        lower_asym = min(b, b + L)
+        upper_asym = max(b, b + L)
+        y_start = _sigmoid_model(np.array([x_min]), L, k, x0, b)[0]
+        y_end = _sigmoid_model(np.array([x_max]), L, k, x0, b)[0]
+
+        tol = 0.2
+        start_low = abs(y_start - lower_asym) / amplitude <= tol
+        start_high = abs(y_start - upper_asym) / amplitude <= tol
+        end_low = abs(y_end - lower_asym) / amplitude <= tol
+        end_high = abs(y_end - upper_asym) / amplitude <= tol
+
+        start_side = "low" if start_low else ("high" if start_high else None)
+        end_side = "low" if end_low else ("high" if end_high else None)
+        asymptotes_covered = (start_side is not None) and (end_side is not None) and (start_side != end_side)
+
+    checks = {
+        "x0_interior": bool(x0_interior),
+        "k_plausible": bool(k_plausible),
+        "ci_finite": bool(ci_finite),
+        "asymptotes_covered": bool(asymptotes_covered),
+    }
+    failed = [name for name, ok in checks.items() if not ok]
+    is_valid = len(failed) == 0
+    reasons = "ok" if is_valid else ";".join(failed)
+    return is_valid, reasons, checks
+
+
 def find_sigmoidal_transitions(x_array, params):
     """
     Step 6: Fit sigmoidal transitions per rat for deplete + 45NaCl.
@@ -898,6 +1048,165 @@ def find_sigmoidal_transitions(x_array, params):
     print(f"  Successful fits: {len(fits_df)} / {len(df_dep_45.id.unique())} rats")
     print(f"  Transition points: {fits_df.x0_orig.round(1).tolist()}")
     return fits_df
+
+
+def find_behavioral_transitions(x_array, params, signal_col="simba_median_balance"):
+    """Fit per-rat continuous sigmoids to a behavioral signal for deplete + 45NaCl."""
+    print(f"  Calculating behavioral transitions from {signal_col}")
+
+    if signal_col not in x_array.columns:
+        print(f"  Behavioral transition column '{signal_col}' not found; skipping behavior fits.")
+        return pd.DataFrame(columns=[
+            "id", "L", "k", "x0_orig", "b", "success", "is_valid", "note",
+            "x0_interior", "k_plausible", "k_negative", "ci_finite", "asymptotes_covered",
+        ])
+
+    cond = params["transition_condition"]
+    inf = params["transition_infusion"]
+    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
+
+    all_fits = []
+    for rat in sorted(df_dep_45.id.unique()):
+        rat_df = (
+            df_dep_45.loc[df_dep_45.id == rat]
+            .sort_values("trial")
+            .copy()
+        )
+
+        y_raw = rat_df[signal_col].to_numpy(dtype=float)
+        finite_mask = np.isfinite(y_raw)
+        x = np.arange(1, len(y_raw) + 1, dtype=float)
+
+        if finite_mask.sum() < 4:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "too_few_points",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+            continue
+
+        x_fit = x[finite_mask]
+        y_fit_raw = y_raw[finite_mask]
+        y_min, y_max = np.nanmin(y_fit_raw), np.nanmax(y_fit_raw)
+        y_range = y_max - y_min
+
+        if y_range < 1e-8:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "no_variation",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+            continue
+
+        y_norm = (y_fit_raw - y_min) / y_range
+        p0 = [1.0, -1.0, float(np.median(x_fit)), 0.0]
+        bounds = (
+            [-np.inf, -np.inf, np.min(x_fit), -np.inf],
+            [np.inf, np.inf, np.max(x_fit), np.inf],
+        )
+
+        try:
+            params_fit, pcov = curve_fit(
+                _sigmoid_model,
+                x_fit,
+                y_norm,
+                p0=p0,
+                bounds=bounds,
+                maxfev=30000,
+            )
+            L, k, x0, b = [float(v) for v in params_fit]
+            _, _, base_checks = _sigmoid_quality_checks(x_fit, params_fit, pcov)
+
+            checks = dict(base_checks)
+            checks["k_plausible"] = True
+            checks["k_negative"] = bool(np.isfinite(k) and (k < 0))
+
+            failed = [name for name, ok in checks.items() if not ok]
+            is_valid = len(failed) == 0
+            note = "ok" if is_valid else ";".join(failed)
+
+            all_fits.append({
+                "id": rat,
+                "L": L,
+                "k": k,
+                "x0_orig": x0,
+                "b": b,
+                "success": True,
+                "is_valid": bool(is_valid),
+                "note": note,
+                "x0_interior": checks["x0_interior"],
+                "k_plausible": checks["k_plausible"],
+                "k_negative": checks["k_negative"],
+                "ci_finite": checks["ci_finite"],
+                "asymptotes_covered": checks["asymptotes_covered"],
+            })
+        except Exception:
+            all_fits.append({
+                "id": rat,
+                "L": np.nan,
+                "k": np.nan,
+                "x0_orig": np.nan,
+                "b": np.nan,
+                "success": False,
+                "is_valid": False,
+                "note": "fit_failed",
+                "x0_interior": False,
+                "k_plausible": True,
+                "k_negative": False,
+                "ci_finite": False,
+                "asymptotes_covered": False,
+            })
+
+    fits_df_behav = pd.DataFrame(all_fits)
+    fits_df_behav = fits_df_behav.query("success == True and is_valid == True and x0_orig > 0").copy()
+
+    print(f"  Successful behavioral fits: {len(fits_df_behav)} / {len(df_dep_45.id.unique())} rats")
+    if not fits_df_behav.empty:
+        print(f"  Behavioral transition points: {fits_df_behav.x0_orig.round(1).tolist()}")
+    return fits_df_behav
+
+
+def _build_realigned_trials(df, fits_df, output_col):
+    """Create a trial-aligned column from a transition table."""
+    if fits_df is None or fits_df.empty:
+        return pd.Series(np.nan, index=df.index, name=output_col, dtype=float)
+
+    transitions = (
+        fits_df[["id", "x0_orig"]]
+        .drop_duplicates(subset=["id"])
+        .assign(_transition=lambda frame: frame["x0_orig"].round().astype(int))
+        .set_index("id")["_transition"]
+    )
+
+    aligned = []
+    for _, row in df.iterrows():
+        rat_id = row["id"]
+        if rat_id not in transitions.index:
+            aligned.append(np.nan)
+        else:
+            aligned.append(row["trial"] - int(transitions.loc[rat_id]))
+
+    return pd.Series(aligned, index=df.index, name=output_col, dtype=float)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -976,7 +1285,29 @@ def sync_aligned_columns(target_df, source_df, merge_cols=None):
     return target_df
 
 
-def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw=None):
+def _drop_legacy_simba_columns(df):
+    """Remove deprecated Simba columns so stale cache columns do not persist."""
+    legacy_cols = [
+        "mean_simba",
+        "simba_pct_time_above_95ci",
+        "simba_median_balance_score",
+        "simba_median_balance_score_pct",
+        "simba_mean_zscore_auc",
+        "simba_primary_metric_value",
+        "simba_primary_metric_name",
+        "simba_trial_metric_value",
+        "simba_trial_metric_name",
+        "simba_null_method",
+        "simba_alignment_method",
+    ]
+    cols_to_drop = [c for c in legacy_cols if c in df.columns]
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
+        print(f"  Dropped legacy Simba columns: {cols_to_drop}")
+    return df
+
+
+def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
     """
@@ -1021,19 +1352,15 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     if time_moving_raw is not None:
         x_combined = x_combined.assign(time_moving_raw=time_moving_raw)
 
-    # Add trial_aligned column for ALL trials (NaN for rats without fits)
-    trial_aligned = []
-    for idx, row in x_combined.iterrows():
-        rat_id = row['id']
-        if rat_id not in fits_df.id.values:
-            # No fit for this rat
-            trial_aligned.append(np.nan)
-        else:
-            # Rat has a fit - calculate relative trial number
-            transition = int(fits_df.query("id == @rat_id").x0_orig.values[0])
-            trial_aligned.append(row['trial'] - transition)
-    
-    x_combined = x_combined.assign(trial_aligned=trial_aligned)
+    realigned_trials_da = _build_realigned_trials(x_combined, fits_df_da, "realigned_trials_da")
+    realigned_trials_behav = _build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
+
+    x_combined = x_combined.assign(
+        realigned_trials_da=realigned_trials_da,
+        realigned_trials_behav=realigned_trials_behav,
+        # Backward-compat alias while notebooks migrate to the clearer DA-specific name.
+        trial_aligned=realigned_trials_da,
+    )
 
     # Now realign the deplete+45NaCl subset (with NaN values dropped)
     cond = params["transition_condition"]
@@ -1041,15 +1368,22 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     z = (
         x_combined
         .query("condition == @cond & infusiontype == @inf")
-        .dropna(subset=['trial_aligned'])
+        .dropna(subset=['realigned_trials_da'])
         .reset_index(drop=True)
     )
 
     print(f"  Combined x_array: {len(x_combined)} trials")
-    print(f"  Added trial_aligned column (NaN for {(x_combined['trial_aligned'].isna()).sum()} trials without fits)")
+    print(
+        f"  Added realigned_trials_da column "
+        f"(NaN for {(x_combined['realigned_trials_da'].isna()).sum()} trials without DA fits)"
+    )
+    print(
+        f"  Added realigned_trials_behav column "
+        f"(NaN for {(x_combined['realigned_trials_behav'].isna()).sum()} trials without behavioral fits)"
+    )
     if time_moving_raw is not None:
         print(f"  Added time_moving_raw column (threshold={params['movement_threshold_raw']} pixels)")
-    print(f"  Realigned deplete+45NaCl subset: {len(z)} trials with valid alignments")
+    print(f"  Realigned deplete+45NaCl subset (DA-aligned): {len(z)} trials with valid alignments")
 
     return x_combined, z
 
@@ -1116,15 +1450,28 @@ def run_pipeline(params=None):
     else:
         cached = None
     if cached is not None:
-        snips_simba, x_simba = cached["snips_simba"], cached["x_simba"]
-        print(f"  Simba from cache: {snips_simba.shape[0]} trials")
-    else:
-        snips_simba, x_simba = assemble_simba(params)
-        _save_cache({"snips_simba": snips_simba, "x_simba": x_simba},
-                    simba_cache_path, "simba", params)
+        snips_simba_raw = cached.get("snips_simba_raw")
+        snips_simba_shifted_baseline = cached.get("snips_simba_shifted_baseline", cached.get("snips_simba_baseline"))
+        snips_simba_zscore = cached["snips_simba_zscore"]
+        x_simba = cached["x_simba"]
+        if snips_simba_raw is None or "simba_raw_mean" not in x_simba.columns:
+            print("  Simba cache missing raw outputs; recomputing Simba step.")
+            cached = None
+        else:
+            print(f"  Simba from cache: {snips_simba_shifted_baseline.shape[0]} trials")
+
+    if cached is None:
+        snips_simba_raw, snips_simba_shifted_baseline, snips_simba_zscore, x_simba = assemble_simba(params)
+        _save_cache(
+            {"snips_simba_raw": snips_simba_raw,
+             "snips_simba_shifted_baseline": snips_simba_shifted_baseline,
+             "snips_simba_baseline": snips_simba_shifted_baseline,
+             "snips_simba_zscore": snips_simba_zscore,
+             "x_simba": x_simba},
+            simba_cache_path, "simba", params)
 
     # Step 3: Equalize
-    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba = equalize_datasets(
+    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba_raw, snips_simba_shifted_baseline, snips_simba_zscore = equalize_datasets(
         x_photo,
         snips_photo,
         x_behav,
@@ -1132,7 +1479,9 @@ def run_pipeline(params=None):
         snips_angvel,
         snips_movement_raw,
         x_simba=x_simba,
-        snips_simba=snips_simba,
+        snips_simba_raw=snips_simba_raw,
+        snips_simba=snips_simba_shifted_baseline,
+        snips_simba_zscore=snips_simba_zscore,
     )
     
     # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
@@ -1142,18 +1491,17 @@ def run_pipeline(params=None):
             x_photo[col] = x_behav[col]
 
     if x_simba is not None:
-        simba_cols = ["simba_pct_time_above_95ci"]
+        x_photo = _drop_legacy_simba_columns(x_photo)
+        simba_cols = [
+            "simba_raw_mean",
+            "simba_zscore_mean",
+            "simba_median_balance",
+        ]
         for col in simba_cols:
             if col in x_simba.columns:
                 x_photo[col] = x_simba[col].values
             else:
                 print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
-
-        # Recompute mean_simba from snips after extraction/equalization so this
-        # always refreshes even when Simba snips are loaded from cache.
-        s, e = params["auc_start_bin"], params["auc_end_bin"]
-        x_photo["mean_simba"] = get_mean_by_window(snips_simba, start_bin=s, end_bin=e)
-        print(f"  Added mean_simba to x_array using bins {s}:{e} (recomputed from snips_simba)")
 
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
@@ -1164,11 +1512,13 @@ def run_pipeline(params=None):
     if cached is not None:
         x_combined, pca_transformed = cached["x_combined"], cached["pca_transformed"]
         x_combined = sync_aligned_columns(x_combined, x_photo)
+        x_combined = _drop_legacy_simba_columns(x_combined)
         print(f"  Clustering from cache: {len(x_combined)} trials")
     else:
         x_combined, pca_transformed = cluster_photometry(snips_photo, x_photo, params)
         # Step 5 always runs with fresh clustering
         x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
+        x_combined = _drop_legacy_simba_columns(x_combined)
         _save_cache({"x_combined": x_combined, "pca_transformed": pca_transformed},
                     clustering_cache_path, "clustering", params)
 
@@ -1185,18 +1535,30 @@ def run_pipeline(params=None):
         cached = _load_cache(transitions_cache_path, "transitions")
     else:
         cached = None
-    if cached is not None:
+    if cached is not None and "fits_df" in cached and "fits_df_behav" in cached:
         fits_df = cached["fits_df"]
-        print(f"  Transitions from cache: {len(fits_df)} fits")
+        fits_df_da = cached.get("fits_df_da", fits_df)
+        fits_df_behav = cached["fits_df_behav"]
+        print(f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits")
     else:
         print(f"  Calculating transitions from deterministic clustering (random_state=0)")
-        fits_df = find_sigmoidal_transitions(x_combined, params)
-        print(f"  Calculated {len(fits_df)} transition fits")
-        _save_cache({"fits_df": fits_df}, transitions_cache_path, "transitions", params)
+        fits_df_da = find_sigmoidal_transitions(x_combined, params)
+        fits_df_behav = find_behavioral_transitions(x_combined, params)
+        fits_df = fits_df_da
+        print(f"  Calculated {len(fits_df_da)} DA transition fits and {len(fits_df_behav)} behavioral transition fits")
+        _save_cache(
+            {"fits_df": fits_df_da, "fits_df_da": fits_df_da, "fits_df_behav": fits_df_behav},
+            transitions_cache_path,
+            "transitions",
+            params,
+        )
+
+    if cached is not None and ("fits_df" not in locals()):
+        fits_df = fits_df_da
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
-        x_combined, snips_photo, snips_movement, snips_angvel, fits_df, params, snips_movement_raw
+        x_combined, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw
     )
 
     # Create metadata about data processing
@@ -1228,11 +1590,17 @@ def run_pipeline(params=None):
     output = {
         "x_array": x_combined,
         "snips_photo": snips_photo,
-        "snips_simba": snips_simba,
+        "snips_simba_raw": snips_simba_raw,
+        "snips_simba_shifted_baseline": snips_simba_shifted_baseline,
+        "snips_simba_zscore": snips_simba_zscore,
+        "snips_simba_baseline": snips_simba_shifted_baseline,  # backward-compat alias
+        "snips_simba": snips_simba_shifted_baseline,  # backward-compat alias
         "snips_movement": snips_movement,
         "snips_angvel": snips_angvel,
         "pca_transformed": pca_transformed,
         "fits_df": fits_df,
+        "fits_df_da": fits_df_da,
+        "fits_df_behav": fits_df_behav,
         "z_dep45": z_dep45,
         "metadata": metadata,
         "params": params,
@@ -1252,11 +1620,15 @@ def run_pipeline(params=None):
     print("=" * 60)
     print(f"  x_array shape:          {x_combined.shape}")
     print(f"  snips_photo shape:      {snips_photo.shape}")
-    print(f"  snips_simba shape:      {snips_simba.shape}")
+    print(f"  snips_simba_raw shape:      {snips_simba_raw.shape}")
+    print(f"  snips_simba_shifted_baseline shape: {snips_simba_shifted_baseline.shape}")
+    print(f"  snips_simba_zscore shape:   {snips_simba_zscore.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
     print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
+    print(f"  fits_df_da shape:  {fits_df_da.shape}")
+    print(f"  fits_df_behav shape: {fits_df_behav.shape}")
     print(f"\nData processing metadata:")
     print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
     print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
