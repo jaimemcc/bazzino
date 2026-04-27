@@ -121,6 +121,10 @@ PARAMS = {
     # ── Snip parameters for AUC calculation ──
     "auc_start_bin": 50,   # bin index for start of infusion window
     "auc_end_bin": 150,    # bin index for end of infusion window
+    "auc_early_start_bin": 50,
+    "auc_early_end_bin": 80,
+    "auc_late_start_bin": 80,
+    "auc_late_end_bin": 150,
 
     # ── Velocity smoothing ──
     "vel_smooth_window": 5,
@@ -1122,7 +1126,13 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
+    s_early = params.get("auc_early_start_bin", 50)
+    e_early = params.get("auc_early_end_bin", 80)
+    s_late = params.get("auc_late_start_bin", 80)
+    e_late = params.get("auc_late_end_bin", 150)
     auc_snips = get_auc_by_window(snips_photo, start_bin=s, end_bin=e)
+    auc_snips_early = get_auc_by_window(snips_photo, start_bin=s_early, end_bin=e_early)
+    auc_snips_late = get_auc_by_window(snips_photo, start_bin=s_late, end_bin=e_late)
     auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
     auc_angvel = get_auc_by_window(snips_angvel_smooth, start_bin=s, end_bin=e)
 
@@ -1143,6 +1153,8 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     x_combined = x_photo.assign(
         auc_snips=auc_snips,
+        auc_snips_early=auc_snips_early,
+        auc_snips_late=auc_snips_late,
         auc_movement=auc_movement,
         auc_angvel=auc_angvel,
         time_moving=time_moving,
@@ -1412,6 +1424,12 @@ def run_pipeline(params=None):
         # Movement analysis parameters
         "normalize_movement": params.get("normalize_movement", True),
         "movement_threshold": params.get("movement_threshold", 0.02),
+        "auc_start_bin": params.get("auc_start_bin", 50),
+        "auc_end_bin": params.get("auc_end_bin", 150),
+        "auc_early_start_bin": params.get("auc_early_start_bin", 50),
+        "auc_early_end_bin": params.get("auc_early_end_bin", 80),
+        "auc_late_start_bin": params.get("auc_late_start_bin", 80),
+        "auc_late_end_bin": params.get("auc_late_end_bin", 150),
         "calculate_raw_movement": params.get("calculate_raw_movement", False),
         "movement_threshold_raw": params.get("movement_threshold_raw", 0.5) if params.get("calculate_raw_movement", False) else None,
         # Angular velocity parameters
