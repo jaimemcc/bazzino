@@ -29,6 +29,27 @@ def _logistic3_model(x, L, x0, k):
     return L / (1 + np.exp(z))
 
 
+def binarize_series_threshold(values, low=-0.7, high=0.7):
+    """Binarize a series with a middle exclusion zone.
+
+    Values >= high map to 1, values <= low map to 0, and middle values become NaN.
+    """
+    arr = np.asarray(values, dtype=float)
+    out = np.full(arr.shape, np.nan, dtype=float)
+    out[arr >= high] = 1.0
+    out[arr <= low] = 0.0
+    return out
+
+
+def quantize_series_threshold(values, low=-0.7, high=0.7):
+    """Quantize a series to {-1, 0, +1} using low/high thresholds."""
+    arr = np.asarray(values, dtype=float)
+    out = np.zeros(arr.shape, dtype=float)
+    out[arr >= high] = 1.0
+    out[arr <= low] = -1.0
+    return out
+
+
 def _safe_pearson(y_true, y_pred):
     if np.allclose(np.std(y_true), 0) or np.allclose(np.std(y_pred), 0):
         return np.nan, np.nan

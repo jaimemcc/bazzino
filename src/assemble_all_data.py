@@ -62,6 +62,8 @@ from model_fit_helpers import (
     fit_logistic_transitions_by_id,
     fit_continuous_sigmoid_transitions_by_id,
     build_realigned_trials,
+    binarize_series_threshold,
+    quantize_series_threshold,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -143,6 +145,17 @@ PARAMS = {
     "transition_condition": "deplete",
     "transition_infusion": "45NaCl",
     "logistic_maxfev": 60000,
+    # Behavioral transition mode for realignment:
+    #   - "median_balance": continuous sigmoid on simba_median_balance
+    #   - "binarized": logistic fit on thresholded simba_median_balance (middle values ignored)
+    #   - "quantized": continuous sigmoid on quantized (-1/0/+1) simba_median_balance
+    "behavior_transition_mode": "median_balance",
+    "behavior_transition_signal_col": "simba_median_balance",
+    "behavior_transition_low_threshold": -0.7,
+    "behavior_transition_high_threshold": 0.7,
+    "behavior_transition_maxfev": 30000,
+    "behavior_transition_require_negative_k": True,
+    "behavior_transition_max_x0": 50,
 
     # ── Output ──
     "output_filename": "assembled_data.pickle",
@@ -891,26 +904,85 @@ def find_sigmoidal_transitions(x_array, params):
 
 
 def find_behavioral_transitions(x_array, params, signal_col="simba_median_balance"):
-    """Fit per-rat continuous sigmoids to a behavioral signal for deplete + 45NaCl."""
-    print(f"  Calculating behavioral transitions from {signal_col}")
+    """Fit per-rat behavioral transitions for deplete + 45NaCl.
+
+    Controlled by params["behavior_transition_mode"]:
+      - "median_balance": continuous sigmoid on signal_col
+      - "binarized": logistic on thresholded signal_col
+      - "quantized": continuous sigmoid on {-1,0,+1} transformed signal_col
+    """
+    mode = params.get("behavior_transition_mode", "median_balance")
+    signal_col = params.get("behavior_transition_signal_col", signal_col)
+    low_thr = float(params.get("behavior_transition_low_threshold", -0.7))
+    high_thr = float(params.get("behavior_transition_high_threshold", 0.7))
+    maxfev = int(params.get("behavior_transition_maxfev", 30000))
+    require_negative_k = bool(params.get("behavior_transition_require_negative_k", True))
+    max_x0 = params.get("behavior_transition_max_x0", 50)
+
+    print(f"  Calculating behavioral transitions using mode='{mode}' from {signal_col}")
 
     if signal_col not in x_array.columns:
         print(f"  Behavioral transition column '{signal_col}' not found; skipping behavior fits.")
-        return pd.DataFrame(columns=[
-            "id", "L", "k", "x0_orig", "b", "success", "is_valid", "note",
-            "x0_interior", "k_plausible", "k_negative", "ci_finite", "asymptotes_covered",
-        ])
+        return pd.DataFrame(columns=["id", "x0_orig", "success", "note"])
 
     cond = params["transition_condition"]
     inf = params["transition_infusion"]
     df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
-    fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
-        df_dep_45,
-        signal_col=signal_col,
-        maxfev=30000,
-        require_negative_k=True,
-        min_x0=0,
-    )
+    bin_col = f"{signal_col}_binarized"
+    quant_col = f"{signal_col}_quantized"
+
+    if mode == "median_balance":
+        fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
+            df_dep_45,
+            signal_col=signal_col,
+            maxfev=maxfev,
+            require_negative_k=require_negative_k,
+            min_x0=0,
+            max_x0=max_x0,
+        )
+    elif mode == "binarized":
+        if bin_col in df_dep_45.columns:
+            fits_df_behav, _ = fit_logistic_transitions_by_id(
+                df_dep_45,
+                signal_col=bin_col,
+                value_transform=None,
+                direction="decreasing",
+                maxfev=max(int(params.get("logistic_maxfev", 60000)), maxfev),
+                min_x0=0,
+                max_x0=max_x0,
+            )
+        else:
+            fits_df_behav, _ = fit_logistic_transitions_by_id(
+                df_dep_45,
+                signal_col=signal_col,
+                value_transform=lambda values: binarize_series_threshold(values, low=low_thr, high=high_thr),
+                direction="decreasing",
+                maxfev=max(int(params.get("logistic_maxfev", 60000)), maxfev),
+                min_x0=0,
+                max_x0=max_x0,
+            )
+    elif mode == "quantized":
+        if quant_col not in df_dep_45.columns:
+            df_dep_45 = df_dep_45.assign(
+                **{quant_col: quantize_series_threshold(df_dep_45[signal_col].to_numpy(dtype=float), low=low_thr, high=high_thr)}
+            )
+        fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
+            df_dep_45,
+            signal_col=quant_col,
+            maxfev=maxfev,
+            require_negative_k=require_negative_k,
+            min_x0=0,
+            max_x0=max_x0,
+        )
+    else:
+        raise ValueError(
+            f"Unknown behavior_transition_mode '{mode}'. "
+            "Expected one of: median_balance, binarized, quantized"
+        )
+
+    if not fits_df_behav.empty:
+        fits_df_behav = fits_df_behav.copy()
+        fits_df_behav["behavior_transition_mode"] = mode
 
     print(f"  Successful behavioral fits: {len(fits_df_behav)} / {len(df_dep_45.id.unique())} rats")
     if not fits_df_behav.empty:
@@ -1013,6 +1085,26 @@ def _drop_legacy_simba_columns(df):
     if cols_to_drop:
         df = df.drop(columns=cols_to_drop)
         print(f"  Dropped legacy Simba columns: {cols_to_drop}")
+    return df
+
+
+def _add_behavior_transition_columns(df, params):
+    """Add binarized/quantized behavior columns so transition modes can reuse them."""
+    signal_col = params.get("behavior_transition_signal_col", "simba_median_balance")
+    low_thr = float(params.get("behavior_transition_low_threshold", -0.7))
+    high_thr = float(params.get("behavior_transition_high_threshold", 0.7))
+
+    if signal_col not in df.columns:
+        print(f"  Could not create transition helper columns: '{signal_col}' not in x_array")
+        return df
+
+    bin_col = f"{signal_col}_binarized"
+    quant_col = f"{signal_col}_quantized"
+
+    signal = df[signal_col].to_numpy(dtype=float)
+    df[bin_col] = binarize_series_threshold(signal, low=low_thr, high=high_thr)
+    df[quant_col] = quantize_series_threshold(signal, low=low_thr, high=high_thr)
+    print(f"  Added transition helper columns: {bin_col}, {quant_col}")
     return df
 
 
@@ -1212,6 +1304,9 @@ def run_pipeline(params=None):
             else:
                 print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
 
+        # Always make thresholded behavior transition columns available on x_array.
+        x_photo = _add_behavior_transition_columns(x_photo, params)
+
     # Step 4: Clustering
     clustering_cache_path = data_folder / params["cache_clustering_file"]
     if params["cache_clustering"]:
@@ -1244,19 +1339,43 @@ def run_pipeline(params=None):
         cached = _load_cache(transitions_cache_path, "transitions")
     else:
         cached = None
-    if cached is not None and "fits_df" in cached and "fits_df_behav" in cached:
+    cache_mode = None
+    if cached is not None:
+        cache_mode = cached.get("behavior_transition_mode")
+        if cache_mode is None and "_cached_params" in cached:
+            cache_mode = cached["_cached_params"].get("behavior_transition_mode")
+
+    if cached is not None and "fits_df" in cached and "fits_df_behav" in cached and cache_mode == params.get("behavior_transition_mode", "median_balance"):
         fits_df = cached["fits_df"]
         fits_df_da = cached.get("fits_df_da", fits_df)
         fits_df_behav = cached["fits_df_behav"]
-        print(f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits")
+        print(
+            f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits "
+            f"(behavior_transition_mode={cache_mode})"
+        )
     else:
+        if cached is not None and cache_mode != params.get("behavior_transition_mode", "median_balance"):
+            print(
+                f"  Transition cache mode mismatch (cached={cache_mode}, "
+                f"current={params.get('behavior_transition_mode', 'median_balance')}); recomputing transitions."
+            )
         print(f"  Calculating transitions from deterministic clustering (random_state=0)")
         fits_df_da = find_sigmoidal_transitions(x_combined, params)
         fits_df_behav = find_behavioral_transitions(x_combined, params)
         fits_df = fits_df_da
         print(f"  Calculated {len(fits_df_da)} DA transition fits and {len(fits_df_behav)} behavioral transition fits")
         _save_cache(
-            {"fits_df": fits_df_da, "fits_df_da": fits_df_da, "fits_df_behav": fits_df_behav},
+            {
+                "fits_df": fits_df_da,
+                "fits_df_da": fits_df_da,
+                "fits_df_behav": fits_df_behav,
+                "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
+                "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
+                "behavior_transition_thresholds": (
+                    params.get("behavior_transition_low_threshold", -0.7),
+                    params.get("behavior_transition_high_threshold", 0.7),
+                ),
+            },
             transitions_cache_path,
             "transitions",
             params,
@@ -1283,6 +1402,10 @@ def run_pipeline(params=None):
         "simba_shift_frames": params.get("simba_shift_frames", 300),
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
         "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
+        "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
+        "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
+        "behavior_transition_low_threshold": params.get("behavior_transition_low_threshold", -0.7),
+        "behavior_transition_high_threshold": params.get("behavior_transition_high_threshold", 0.7),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
         "behav_metrics": "movement + angular_velocity (both always calculated)",
@@ -1338,6 +1461,7 @@ def run_pipeline(params=None):
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"  fits_df_da shape:  {fits_df_da.shape}")
     print(f"  fits_df_behav shape: {fits_df_behav.shape}")
+    print(f"  behavioral transition mode: {metadata['behavior_transition_mode']}")
     print(f"\nData processing metadata:")
     print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
     print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
