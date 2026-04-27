@@ -37,7 +37,6 @@ import dill
 import tdt
 import trompy as tp
 
-from scipy.optimize import curve_fit
 from scipy.spatial.distance import cdist
 from sklearn.decomposition import PCA
 from sklearn.cluster import SpectralClustering
@@ -58,6 +57,11 @@ from extract_simba import (
     get_shifted_snip_means,
     get_shifted_snip_means_multi_shift,
     get_time_above_simba_ci,
+)
+from model_fit_helpers import (
+    fit_logistic_transitions_by_id,
+    fit_continuous_sigmoid_transitions_by_id,
+    build_realigned_trials,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -859,156 +863,6 @@ def compute_cluster_distances(x_array, pca_data, params):
 # STEP 6: Sigmoidal transition fitting
 # ──────────────────────────────────────────────────────────────────────
 
-def _logistic4(x, A, L, x0, k):
-    return A + (L - A) / (1 + np.exp(-k * (x - x0)))
-
-def _logistic3(x, L, x0, k):
-    return L / (1 + np.exp(-k * (x - x0)))
-
-
-def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60000):
-    """Fit a logistic curve to binary/near-binary data with robust inits."""
-    if x is None:
-        x = np.arange(len(y), dtype=float)
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-
-    # Normalize x
-    x_mean, x_std = float(np.mean(x)), float(np.std(x))
-    if not np.isfinite(x_std) or x_std == 0:
-        x_std = 1.0
-    x_norm = (x - x_mean) / x_std
-    y_clip = np.clip(y, 1e-4, 1 - 1e-4)
-
-    y_min, y_max = float(np.min(y_clip)), float(np.max(y_clip))
-    A_init, L_init, x0_init = y_min, y_max, 0.0
-
-    if direction is None:
-        try:
-            c = float(np.corrcoef(x, y_clip)[0, 1])
-        except Exception:
-            c = 0.0
-        if not np.isfinite(c):
-            c = 0.0
-        sign = 1.0 if c >= 0 else -1.0
-    else:
-        sign = 1.0 if direction == "increasing" else -1.0
-
-    k_mags = [0.5, 1.0, 2.0]
-
-    def try_fit(func, p0_list, bounds):
-        best, best_rss = None, np.inf
-        for p0 in p0_list:
-            try:
-                popt, _ = curve_fit(func, x_norm, y_clip, p0=p0, bounds=bounds, maxfev=maxfev)
-                y_hat = func(x_norm, *popt)
-                rss = float(np.sum((y_clip - y_hat) ** 2))
-                if rss < best_rss:
-                    best_rss, best = rss, (popt, y_hat)
-            except Exception:
-                continue
-        return best
-
-    res4 = None
-    if prefer_4p:
-        p0s_4 = [[A_init, L_init, x0_init, sign * km] for km in k_mags]
-        bnds_4 = ([-0.1, 0.4, -3.0, -10.0], [0.6, 1.6, 3.0, 10.0])
-        res4 = try_fit(_logistic4, p0s_4, bnds_4)
-
-    p0s_3 = [[L_init, x0_init, sign * km] for km in k_mags]
-    bnds_3 = ([0.4, -3.0, -10.0], [1.6, 3.0, 10.0])
-    res3 = try_fit(_logistic3, p0s_3, bnds_3)
-
-    if res4 is not None:
-        popt, y_hat = res4
-        A, L, x0n, k = map(float, popt)
-        x0_orig = x0n * x_std + x_mean
-        # Calculate R-squared
-        ss_res = float(np.sum((y_clip - y_hat) ** 2))
-        ss_tot = float(np.sum((y_clip - np.mean(y_clip)) ** 2))
-        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        return {"model": "logistic4", "x0_orig": x0_orig, "k": k, "r_squared": r_squared,
-                "params": {"A": A, "L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
-                "y_hat": y_hat, "success": True, "note": ""}
-    elif res3 is not None:
-        popt, y_hat = res3
-        L, x0n, k = map(float, popt)
-        x0_orig = x0n * x_std + x_mean
-        # Calculate R-squared
-        ss_res = float(np.sum((y_clip - y_hat) ** 2))
-        ss_tot = float(np.sum((y_clip - np.mean(y_clip)) ** 2))
-        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-        # For 3p model, A is implicitly 0 (the function is A + (L-A)/(1+exp(...)) with A=0)
-        A = 0.0
-        return {"model": "logistic3", "x0_orig": x0_orig, "k": k, "r_squared": r_squared,
-                "params": {"A": A, "L": L, "x0_norm": x0n, "x0_orig": x0_orig, "k": k},
-                "y_hat": y_hat, "success": True, "note": "4p failed; used 3p"}
-    else:
-        return {"model": None, "x0_orig": np.nan, "k": np.nan, "r_squared": np.nan,
-                "params": {}, "y_hat": None, "success": False, "note": "fit failed"}
-
-
-def _sigmoid_model(x, L, k, x0, b):
-    """4-parameter sigmoid function used for continuous behavioral fits."""
-    z = np.clip(-k * (x - x0), -60, 60)
-    return L / (1 + np.exp(z)) + b
-
-
-def _sigmoid_quality_checks(x, params, pcov):
-    """Quality checks for continuous sigmoid fits."""
-    if params is None or len(params) != 4 or np.any(~np.isfinite(params)):
-        return False, "fit_failed", {
-            "x0_interior": False,
-            "k_plausible": False,
-            "ci_finite": False,
-            "asymptotes_covered": False,
-        }
-
-    L, k, x0, b = params
-    x_min, x_max = float(np.min(x)), float(np.max(x))
-    x_range = max(x_max - x_min, 1.0)
-    edge_margin = 0.15 * x_range
-    x0_interior = (x_min + edge_margin) <= x0 <= (x_max - edge_margin)
-    k_plausible = np.isfinite(k) and (0.02 <= abs(k) <= 2.5)
-
-    ci_finite = False
-    if pcov is not None:
-        diag = np.diag(pcov)
-        if np.all(np.isfinite(diag)) and np.all(diag >= 0):
-            se = np.sqrt(diag)
-            ci_finite = np.all(np.isfinite(se)) and np.all(se > 0)
-
-    amplitude = abs(L)
-    if amplitude < 1e-8:
-        asymptotes_covered = False
-    else:
-        lower_asym = min(b, b + L)
-        upper_asym = max(b, b + L)
-        y_start = _sigmoid_model(np.array([x_min]), L, k, x0, b)[0]
-        y_end = _sigmoid_model(np.array([x_max]), L, k, x0, b)[0]
-
-        tol = 0.2
-        start_low = abs(y_start - lower_asym) / amplitude <= tol
-        start_high = abs(y_start - upper_asym) / amplitude <= tol
-        end_low = abs(y_end - lower_asym) / amplitude <= tol
-        end_high = abs(y_end - upper_asym) / amplitude <= tol
-
-        start_side = "low" if start_low else ("high" if start_high else None)
-        end_side = "low" if end_low else ("high" if end_high else None)
-        asymptotes_covered = (start_side is not None) and (end_side is not None) and (start_side != end_side)
-
-    checks = {
-        "x0_interior": bool(x0_interior),
-        "k_plausible": bool(k_plausible),
-        "ci_finite": bool(ci_finite),
-        "asymptotes_covered": bool(asymptotes_covered),
-    }
-    failed = [name for name, ok in checks.items() if not ok]
-    is_valid = len(failed) == 0
-    reasons = "ok" if is_valid else ";".join(failed)
-    return is_valid, reasons, checks
-
-
 def find_sigmoidal_transitions(x_array, params):
     """
     Step 6: Fit sigmoidal transitions per rat for deplete + 45NaCl.
@@ -1022,28 +876,14 @@ def find_sigmoidal_transitions(x_array, params):
     cond = params["transition_condition"]
     inf = params["transition_infusion"]
     df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
-
-    all_fits = []
-    for rat in df_dep_45.id.unique():
-        sig = df_dep_45.loc[df_dep_45.id == rat, "cluster_photo"].to_numpy()
-        y = np.logical_not(sig).astype(int)
-        x = np.arange(len(y), dtype=float)
-
-        fit = fit_logistic_per_series(y, x=x, prefer_4p=True, direction="decreasing",
-                                      maxfev=params["logistic_maxfev"])
-        all_fits.append({
-            "id": rat,
-            **fit["params"],
-            "model": fit["model"],
-            "x0_orig": fit["x0_orig"],
-            "k": fit["k"],
-            "r_squared": fit["r_squared"],
-            "success": fit["success"],
-            "note": fit["note"],
-        })
-
-    fits_df = pd.DataFrame(all_fits)
-    fits_df = fits_df.query("success == True and x0_orig > 0").copy()
+    fits_df, _ = fit_logistic_transitions_by_id(
+        df_dep_45,
+        signal_col="cluster_photo",
+        value_transform=lambda sig: np.logical_not(sig).astype(int),
+        direction="decreasing",
+        maxfev=params["logistic_maxfev"],
+        min_x0=0,
+    )
 
     print(f"  Successful fits: {len(fits_df)} / {len(df_dep_45.id.unique())} rats")
     print(f"  Transition points: {fits_df.x0_orig.round(1).tolist()}")
@@ -1064,149 +904,18 @@ def find_behavioral_transitions(x_array, params, signal_col="simba_median_balanc
     cond = params["transition_condition"]
     inf = params["transition_infusion"]
     df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
-
-    all_fits = []
-    for rat in sorted(df_dep_45.id.unique()):
-        rat_df = (
-            df_dep_45.loc[df_dep_45.id == rat]
-            .sort_values("trial")
-            .copy()
-        )
-
-        y_raw = rat_df[signal_col].to_numpy(dtype=float)
-        finite_mask = np.isfinite(y_raw)
-        x = np.arange(1, len(y_raw) + 1, dtype=float)
-
-        if finite_mask.sum() < 4:
-            all_fits.append({
-                "id": rat,
-                "L": np.nan,
-                "k": np.nan,
-                "x0_orig": np.nan,
-                "b": np.nan,
-                "success": False,
-                "is_valid": False,
-                "note": "too_few_points",
-                "x0_interior": False,
-                "k_plausible": True,
-                "k_negative": False,
-                "ci_finite": False,
-                "asymptotes_covered": False,
-            })
-            continue
-
-        x_fit = x[finite_mask]
-        y_fit_raw = y_raw[finite_mask]
-        y_min, y_max = np.nanmin(y_fit_raw), np.nanmax(y_fit_raw)
-        y_range = y_max - y_min
-
-        if y_range < 1e-8:
-            all_fits.append({
-                "id": rat,
-                "L": np.nan,
-                "k": np.nan,
-                "x0_orig": np.nan,
-                "b": np.nan,
-                "success": False,
-                "is_valid": False,
-                "note": "no_variation",
-                "x0_interior": False,
-                "k_plausible": True,
-                "k_negative": False,
-                "ci_finite": False,
-                "asymptotes_covered": False,
-            })
-            continue
-
-        y_norm = (y_fit_raw - y_min) / y_range
-        p0 = [1.0, -1.0, float(np.median(x_fit)), 0.0]
-        bounds = (
-            [-np.inf, -np.inf, np.min(x_fit), -np.inf],
-            [np.inf, np.inf, np.max(x_fit), np.inf],
-        )
-
-        try:
-            params_fit, pcov = curve_fit(
-                _sigmoid_model,
-                x_fit,
-                y_norm,
-                p0=p0,
-                bounds=bounds,
-                maxfev=30000,
-            )
-            L, k, x0, b = [float(v) for v in params_fit]
-            _, _, base_checks = _sigmoid_quality_checks(x_fit, params_fit, pcov)
-
-            checks = dict(base_checks)
-            checks["k_plausible"] = True
-            checks["k_negative"] = bool(np.isfinite(k) and (k < 0))
-
-            failed = [name for name, ok in checks.items() if not ok]
-            is_valid = len(failed) == 0
-            note = "ok" if is_valid else ";".join(failed)
-
-            all_fits.append({
-                "id": rat,
-                "L": L,
-                "k": k,
-                "x0_orig": x0,
-                "b": b,
-                "success": True,
-                "is_valid": bool(is_valid),
-                "note": note,
-                "x0_interior": checks["x0_interior"],
-                "k_plausible": checks["k_plausible"],
-                "k_negative": checks["k_negative"],
-                "ci_finite": checks["ci_finite"],
-                "asymptotes_covered": checks["asymptotes_covered"],
-            })
-        except Exception:
-            all_fits.append({
-                "id": rat,
-                "L": np.nan,
-                "k": np.nan,
-                "x0_orig": np.nan,
-                "b": np.nan,
-                "success": False,
-                "is_valid": False,
-                "note": "fit_failed",
-                "x0_interior": False,
-                "k_plausible": True,
-                "k_negative": False,
-                "ci_finite": False,
-                "asymptotes_covered": False,
-            })
-
-    fits_df_behav = pd.DataFrame(all_fits)
-    fits_df_behav = fits_df_behav.query("success == True and is_valid == True and x0_orig > 0").copy()
+    fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
+        df_dep_45,
+        signal_col=signal_col,
+        maxfev=30000,
+        require_negative_k=True,
+        min_x0=0,
+    )
 
     print(f"  Successful behavioral fits: {len(fits_df_behav)} / {len(df_dep_45.id.unique())} rats")
     if not fits_df_behav.empty:
         print(f"  Behavioral transition points: {fits_df_behav.x0_orig.round(1).tolist()}")
     return fits_df_behav
-
-
-def _build_realigned_trials(df, fits_df, output_col):
-    """Create a trial-aligned column from a transition table."""
-    if fits_df is None or fits_df.empty:
-        return pd.Series(np.nan, index=df.index, name=output_col, dtype=float)
-
-    transitions = (
-        fits_df[["id", "x0_orig"]]
-        .drop_duplicates(subset=["id"])
-        .assign(_transition=lambda frame: frame["x0_orig"].round().astype(int))
-        .set_index("id")["_transition"]
-    )
-
-    aligned = []
-    for _, row in df.iterrows():
-        rat_id = row["id"]
-        if rat_id not in transitions.index:
-            aligned.append(np.nan)
-        else:
-            aligned.append(row["trial"] - int(transitions.loc[rat_id]))
-
-    return pd.Series(aligned, index=df.index, name=output_col, dtype=float)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1352,8 +1061,8 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     if time_moving_raw is not None:
         x_combined = x_combined.assign(time_moving_raw=time_moving_raw)
 
-    realigned_trials_da = _build_realigned_trials(x_combined, fits_df_da, "realigned_trials_da")
-    realigned_trials_behav = _build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
+    realigned_trials_da = build_realigned_trials(x_combined, fits_df_da, "realigned_trials_da")
+    realigned_trials_behav = build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
 
     x_combined = x_combined.assign(
         realigned_trials_da=realigned_trials_da,

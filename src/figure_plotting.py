@@ -11,7 +11,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from scipy import stats
-from scipy.optimize import curve_fit
+from model_fit_helpers import fit_curve_series, _sigmoid_model, _exp_model
 
 
 def smooth_array(arr, window_size=5):
@@ -695,32 +695,38 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
         draw_regression_line(inf, ax, color)
         
     elif fit == "sigmoid":
-        
-
-        def _sigmoid_model(x, L, k, x0, b):
-            z = np.clip(-k * (x - x0), -60, 60)
-            return L / (1 + np.exp(z)) + b
-
-        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[1, 1, 25, -1], maxfev=10000)
-        x_fit = np.linspace(0, len(inf)-1, 100)
-        y_fit = _sigmoid_model(x_fit, *popt)
-        y_pred = _sigmoid_model(x, *popt)
-        r_value, p_value = _fit_corr_stats(inf, y_pred)
-        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
-        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        fit_res = fit_curve_series(
+            x,
+            inf,
+            model_name="sigmoidal",
+            p0=[1, 1, 25, -1],
+            bounds=([-np.inf, -np.inf, np.min(x), -np.inf], [np.inf, np.inf, np.max(x), np.inf]),
+            maxfev=10000,
+        )
+        if fit_res["success"]:
+            popt = fit_res["params"]
+            x_fit = np.linspace(0, len(inf) - 1, 100)
+            y_fit = _sigmoid_model(x_fit, *popt)
+            r_value, p_value = fit_res["r"], fit_res["p"]
+            print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
+            ax.plot(x_fit, y_fit, color=color, lw=1.5)
         
     elif fit == "exponential":
-
-        def _exp_model(x, a, b, c):
-            return a * np.exp(b * x) + c
-
-        popt, _ = curve_fit(_exp_model, x, inf, p0=[1, -0.1, -1], maxfev=10000)
-        x_fit = np.linspace(0, len(inf)-1, 100)
-        y_fit = _exp_model(x_fit, *popt)
-        y_pred = _exp_model(x, *popt)
-        r_value, p_value = _fit_corr_stats(inf, y_pred)
-        print(f"Exponential fit parameters: a={popt[0]:.2f}, b={popt[1]:.2f}, c={popt[2]:.2f}")
-        ax.plot(x_fit, y_fit, color=color, lw=1.5)
+        fit_res = fit_curve_series(
+            x,
+            inf,
+            model_name="exponential",
+            p0=[1, -0.1, -1],
+            bounds=([-np.inf, -np.inf, -np.inf], [np.inf, np.inf, np.inf]),
+            maxfev=10000,
+        )
+        if fit_res["success"]:
+            popt = fit_res["params"]
+            x_fit = np.linspace(0, len(inf) - 1, 100)
+            y_fit = _exp_model(x_fit, *popt)
+            r_value, p_value = fit_res["r"], fit_res["p"]
+            print(f"Exponential fit parameters: a={popt[0]:.2f}, b={popt[1]:.2f}, c={popt[2]:.2f}")
+            ax.plot(x_fit, y_fit, color=color, lw=1.5)
 
     sns.despine(ax=ax, offset=2)
     
@@ -833,17 +839,21 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
         draw_regression_line(inf, ax, color)
 
     elif fit == "sigmoid":
-        def _sigmoid_model(x, L, k, x0, b):
-            z = np.clip(-k * (x - x0), -60, 60)
-            return L / (1 + np.exp(z)) + b
-
-        popt, _ = curve_fit(_sigmoid_model, x, inf, p0=[250, 0.1, 25, -60], maxfev=10000)
-        x_fit = np.linspace(0, len(inf)-1, 100)
-        y_fit = _sigmoid_model(x_fit, *popt)
-        y_pred = _sigmoid_model(x, *popt)
-        r_value, p_value = _fit_corr_stats(inf, y_pred)
-        ax.plot(x_fit, y_fit, color=color, lw=1.5)
-        print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
+        fit_res = fit_curve_series(
+            x,
+            inf,
+            model_name="sigmoidal",
+            p0=[250, 0.1, 25, -60],
+            bounds=([-np.inf, -np.inf, np.min(x), -np.inf], [np.inf, np.inf, np.max(x), np.inf]),
+            maxfev=10000,
+        )
+        if fit_res["success"]:
+            popt = fit_res["params"]
+            x_fit = np.linspace(0, len(inf) - 1, 100)
+            y_fit = _sigmoid_model(x_fit, *popt)
+            r_value, p_value = fit_res["r"], fit_res["p"]
+            ax.plot(x_fit, y_fit, color=color, lw=1.5)
+            print(f"Sigmoid fit parameters: L={popt[0]:.2f}, k={popt[1]:.2f}, x0={popt[2]:.2f}, b={popt[3]:.2f}")
 
     if print_stats:
         if p_value < 0.001:
