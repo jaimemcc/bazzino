@@ -230,6 +230,159 @@ def _sigmoid_quality_checks(x, params, pcov):
     return is_valid, reasons, checks
 
 
+def is_valid_sigmoid_fit(
+    popt,
+    x,
+    y,
+    x0_min=None,
+    x0_max=None,
+    min_dynamic_range_frac=0.05,
+    pcov=None,
+    param_order="legacy",
+):
+    """Validate a 4-parameter sigmoid fit against shape and plausibility checks.
+
+    Parameters
+    ----------
+    popt : array-like
+        Sigmoid parameters in either legacy order ``[L, x0, k, b]`` or module
+        order ``[L, k, x0, b]``.
+    x, y : array-like
+        Data used for fitting.
+    x0_min, x0_max : float, optional
+        Allowed bounds for transition midpoint.
+    min_dynamic_range_frac : float
+        Minimum fraction of observed y-range required for |L|.
+    pcov : ndarray, optional
+        Covariance matrix from fit; when present, finite CI is required.
+    param_order : {"legacy", "module"}
+        Parameter order of ``popt``.
+    """
+    popt = np.asarray(popt, dtype=float)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if popt.size != 4 or not np.all(np.isfinite(popt)):
+        return False
+
+    if param_order == "legacy":
+        module_params = np.array([popt[0], popt[2], popt[1], popt[3]], dtype=float)
+    elif param_order == "module":
+        module_params = popt
+    else:
+        raise ValueError("param_order must be 'legacy' or 'module'")
+
+    _, _, checks = _sigmoid_quality_checks(x, module_params, pcov=pcov)
+
+    if x0_min is None:
+        x0_min = float(np.nanmin(x))
+    if x0_max is None:
+        x0_max = float(np.nanmax(x))
+
+    x0 = float(module_params[2])
+    if (x0 < x0_min) or (x0 > x0_max):
+        return False
+
+    required_checks = {"x0_interior", "k_plausible", "asymptotes_covered"}
+    if pcov is not None:
+        required_checks.add("ci_finite")
+    if any(not checks.get(name, False) for name in required_checks):
+        return False
+
+    y_min = float(np.nanmin(y))
+    y_max = float(np.nanmax(y))
+    y_range = max(y_max - y_min, 1e-9)
+    if abs(float(module_params[0])) < (min_dynamic_range_frac * y_range):
+        return False
+
+    return True
+
+
+def fit_sigmoid(
+    df,
+    column,
+    parameter,
+    fit_to_raw_data=True,
+    initial_k=-1,
+    k_min=-2,
+    k_max=2,
+    x0_min=None,
+    x0_max=None,
+    asymptote_tol_frac=0.25,
+    min_dynamic_range_frac=0.05,
+    validate_fit=True,
+    maxfev=10000,
+    return_param_order="legacy",
+):
+    """Fit a bounded 4-parameter sigmoid from a dataframe.
+
+    Parameters match the historical notebook helper so notebooks can import
+    this function from src without changing figure behavior.
+
+    Returns
+    -------
+    np.ndarray
+        Four parameters. ``return_param_order='legacy'`` returns
+        ``[L, x0, k, b]`` (notebook order), while ``'module'`` returns
+        ``[L, k, x0, b]`` (internal model order).
+    """
+    if fit_to_raw_data:
+        df_clean = df[[column, parameter]].dropna()
+        x = df_clean[column].to_numpy(dtype=float)
+        y = df_clean[parameter].to_numpy(dtype=float)
+    else:
+        mean = df.groupby(column).mean(numeric_only=True)[parameter]
+        x = mean.index.to_numpy(dtype=float)
+        y = mean.to_numpy(dtype=float)
+
+    if len(x) < 4:
+        return np.full(4, np.nan, dtype=float)
+
+    if x0_min is None:
+        x0_min = float(np.nanmin(x))
+    if x0_max is None:
+        x0_max = float(np.nanmax(x))
+
+    initial_k = float(np.clip(initial_k, k_min, k_max))
+    initial_x0 = float(np.clip(np.nanmedian(x), x0_min, x0_max))
+    p0 = [float(np.nanmax(y)), initial_k, initial_x0, float(np.nanmin(y))]
+    bounds = (
+        [-np.inf, k_min, x0_min, -np.inf],
+        [np.inf, k_max, x0_max, np.inf],
+    )
+
+    fit_res = fit_curve_series(
+        x,
+        y,
+        model_name="sigmoidal",
+        p0=p0,
+        bounds=bounds,
+        maxfev=maxfev,
+    )
+
+    if not fit_res["success"]:
+        return np.full(4, np.nan, dtype=float)
+
+    params = np.asarray(fit_res["params"], dtype=float)
+    if validate_fit and not is_valid_sigmoid_fit(
+        params,
+        x,
+        y,
+        x0_min=x0_min,
+        x0_max=x0_max,
+        min_dynamic_range_frac=min_dynamic_range_frac,
+        pcov=fit_res.get("pcov"),
+        param_order="module",
+    ):
+        return np.full(4, np.nan, dtype=float)
+
+    if return_param_order == "module":
+        return params
+    if return_param_order == "legacy":
+        return np.array([params[0], params[2], params[1], params[3]], dtype=float)
+    raise ValueError("return_param_order must be 'legacy' or 'module'")
+
+
 def fit_logistic_per_series(y, x=None, prefer_4p=True, direction=None, maxfev=60000):
     """Fit logistic curve to binary/near-binary data for one series.
 
