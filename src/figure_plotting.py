@@ -953,3 +953,53 @@ def plot_lag_histogram(
     ax.axvline(0, color='gray', linestyle=':', linewidth=1, alpha=0.5)
 
     sns.despine(ax=ax)
+    
+def make_euclidean_distance_heatmap_all_rats():
+    
+    heatmap_vmin = np.nanpercentile(distances, 5)
+    heatmap_vmax = np.nanpercentile(distances, 95)
+    cmap = plt.get_cmap("Oranges").reversed()
+
+    # All-animal heatmap
+    fig, ax = plt.subplots(figsize=(1.8, 1.8))
+
+    sns.heatmap(
+        distances,
+        ax=ax,
+        cmap=cmap,
+        vmin=heatmap_vmin,
+        vmax=heatmap_vmax,
+        cbar=False,
+        xticklabels=False,
+        yticklabels=False,
+    )
+
+    for boundary in group_boundaries[:-1]:
+        ax.axhline(boundary, color="white", linewidth=1)
+        ax.axvline(boundary, color="white", linewidth=1)
+
+    return fig, ax
+
+
+def make_euclidean_distance_heatmap_averaged():
+    
+    # Group-averaged heatmap with separate colorbar
+    fig2, ax2 = plt.subplots(figsize=(1.8, 1.8))
+    fig2_cbar, ax2_cbar = plt.subplots(figsize=(0.18, 1.8))
+
+    sns.heatmap(
+        group_distance_matrix,
+        ax=ax2,
+        cmap=cmap,
+        annot=False,
+        fmt=".2f",
+        cbar_ax=ax2_cbar,
+        linewidths=1,
+        linecolor="white",
+    )
+    ax2.set_yticks([])
+    ax2.set_xticks([])
+    
+    return fig, ax
+
+
