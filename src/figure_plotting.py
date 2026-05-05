@@ -1159,24 +1159,17 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
                            color="#1f77b4",
                            da_label=True, behav_label=True):
     
-    fig, ax = plt.subplots(figsize=(3.6, 2.1), ncols=2, sharey=True,
-                     gridspec_kw={"left": 0.3, "right": 0.9, "top": 0.8, "bottom": 0.25,
+    fig, ax = plt.subplots(figsize=(3.4, 2.1), ncols=2, sharey=True,
+                     gridspec_kw={"left": 0.2, "right": 0.9, "top": 0.8, "bottom": 0.25,
                                   "wspace": 0.3},)
     
     df = data_for_figure["df"]
     
     if parameter_key == "behav":
         ylabel = 'App. behaviour'
-        
     else:  # Default to dopamine
         ylabel = 'Dopamine AUC'
-    #     da_k = data_for_figure['k_da_orig']
-    #     behav_k = data_for_figure['k_behav_orig']
-    #     xlabel = "Trial"
-    # else:
-    #     da_k = data_for_figure['k_da_realigned']
-    #     behav_k = data_for_figure['k_behav_realigned']
-    #     xlabel = "Trial (realigned)"
+
 
     plot_auc_and_sigmoid(df, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color)
     ax[0].set_xlabel("Trial", fontsize=10)
@@ -1189,7 +1182,9 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
     
     plot_auc_and_sigmoid(df, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color)
     ax[1].set_xlabel("Trial (realigned)", fontsize=10)
-    ax[1].set_xticks([-10, 0, 20])
+    ax[1].set_xticks([-10, 0, 10, 20])
+    
+    ax[1].axvline(0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
 
     ax[1].tick_params(axis='y', labelcolor=color)
     ax[1].text(0.5, 1.1,
@@ -1222,7 +1217,7 @@ def make_normalized_realignment_plot(data_for_figure, window_trials=np.arange(-5
     )
     
     fig, ax = plt.subplots(figsize=(2.3, 2.1),
-                     gridspec_kw={"left": 0.25, "right": 0.75, "top": 0.8, "bottom": 0.25},)
+                     gridspec_kw={"left": 0.25, "right": 0.9, "top": 0.8, "bottom": 0.25},)
     
     ax.plot(
         window_trials,

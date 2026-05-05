@@ -23,22 +23,27 @@ def get_realigned_data(df, realignment_column, rats_to_exclude=[], verbose=True)
         for animal in animals:
             n_trials = len(subset_aligned.query("id == @animal"))
             print(f"  {animal}: {n_trials} trials")
-            
-    # Keep only realigned trials where all selected rats are represented
-    subset_aligned_complete = (
-        subset_aligned
-        .groupby(realignment_column, group_keys=False)
-        .filter(lambda g: len(g) == n_required)
-        .copy()
-    )
+
+    return subset_aligned
+
+def only_keep_complete_trials(df, realignment_column, verbose=False):
+    # Get the number of unique animals in the dataset
+    n_animals = df.id.nunique()
     
+    # Group by realignment column and filter groups that have all animals represented
+    df_complete = (
+        df
+        .groupby(realignment_column, group_keys=False)
+        .filter(lambda g: len(g) == n_animals)
+    )
+                
     if verbose:
-        print(f"\nComplete realigned trial rows: {len(subset_aligned_complete)}")
+        print(f"\nComplete realigned trial rows: {len(df_complete)}")
         
-        print(subset_aligned_complete
+        print(df_complete
                 .query(f"{realignment_column} == 0")
                 .loc[:, ["id", "trial", realignment_column]]) 
     
-    return subset_aligned_complete
+    return df_complete
     
     
