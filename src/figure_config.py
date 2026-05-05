@@ -64,10 +64,11 @@ HEATMAP_CMAP_BLUE = LinearSegmentedColormap.from_list(
 # Paths
 # ──────────────────────────────────────────────────────────────────────
 
-# These are relative paths for use in notebooks (notebooks/ folder as working directory)
-DATAFOLDER = Path("../data")
-RESULTSFOLDER = Path("../results")
-FIGSFOLDER = Path("../paper/figs/panels")
+# Build paths from repository root so notebooks are robust to cwd changes.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATAFOLDER = REPO_ROOT / "data"
+RESULTSFOLDER = REPO_ROOT / "results"
+FIGSFOLDER = REPO_ROOT / "paper" / "figs" / "panels"
 
 # Ensure figures folder exists
 FIGSFOLDER.mkdir(parents=True, exist_ok=True)

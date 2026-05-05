@@ -11,7 +11,7 @@ import seaborn as sns
 import pandas as pd
 from pathlib import Path
 from scipy import stats
-from model_fit_helpers import fit_curve_series, _sigmoid_model, _exp_model
+from model_fit_helpers import fit_curve_series, fit_sigmoid, _sigmoid_model, _exp_model
 
 from distance_matrix import compute_mds_coordinates, GROUP_COLORS, GROUP_ORDER, GROUP_LABELS
 
@@ -862,21 +862,21 @@ def make_correlation_plot_da_1group(inf, color, yaxis=False, fit="linear", retur
             p_text = "p<0.001"
         else:
             p_text = f"p={p_value:.3f}"
-        ax.text(20, 200, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
+        ax.text(20, 20, f"r={r_value:.2f}, {p_text}", color=color, fontsize=8,
                 va="bottom", ha="center")
 
     sns.despine(ax=ax, offset=2)
 
     if yaxis:
-        ax.set_yticks([-50, 0, 50, 100, 150])
+        ax.set_yticks([-5, 0, 5, 10, 15])
         ax.set_ylabel("Dopamine (AUC)")
     else:
-        ax.set_yticks([-50, 0, 50, 100, 150], labels=["", "", "", "", ""])
+        ax.set_yticks([-5, 0, 5, 10, 15], labels=["", "", "", "", ""])
         
     if ylim is not None:
         ax.set_ylim(ylim)
     else:
-        ax.set_ylim([-65, 190])
+        ax.set_ylim([-6.5, 19.0])
 
     ax.set_xticks([0, 49])
     ax.set_xlabel("Trial")
@@ -1033,4 +1033,223 @@ def make_mds_plot(coords, group_to_row_indices):
     
     return fig, ax
 
+def sigmoid(x, L, x0, k, b):
+    """4-parameter sigmoid function with legacy notebook parameter order."""
+    return _sigmoid_model(np.asarray(x, dtype=float), L, k, x0, b)
 
+def plot_auc_and_sigmoid(df, trial_column, data_column, ax=None, first_trial=0,
+                         include_steepness=True, color="#1f77b4", fit_to_raw_data=True):
+    """Plot AUC data grouped by column with sigmoid fit."""
+    if ax is None:
+        f, ax = plt.subplots(figsize=(3, 3))
+
+    mean = df.groupby(trial_column).mean(numeric_only=True)[data_column]
+    sd = df.groupby(trial_column).std(numeric_only=True)[data_column].values
+    sem = sd / np.sqrt(len(df.id.unique()))
+    x, y = (mean.index.values, mean.values)
+
+    ax.plot(x, y, color=color, linestyle="", marker="o", markersize=5,
+            markerfacecolor="white", alpha=0.5)
+    ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.1)
+
+    popt = fit_sigmoid(
+        df,
+        trial_column,
+        data_column,
+        fit_to_raw_data=fit_to_raw_data,
+        initial_k=-1,
+        validate_fit=True,
+        return_param_order="legacy",
+    )
+    if np.all(np.isfinite(popt)):
+        y_fit = sigmoid(x, *popt)
+        ax.plot(x, y_fit, color=color, lw=2, linestyle="--")
+        if include_steepness:
+            ax.text(first_trial, np.max(y) * 0.9, f"k = {popt[2]:.2f}",
+                    color=color, fontsize=9, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    else:
+        print("Failed to fit sigmoid for AUC plot")
+
+    return popt
+
+def plot_realigned_behaviour(df, trial_column, ax=None, first_trial=0,
+                             include_steepness=False, simba_col="simba_median_balance",
+                              color="#2ca02c", fit_to_raw_data=True):
+    """Plot behavior (mean_simba) grouped by column with sigmoid fit."""
+    if ax is None:
+        f, ax = plt.subplots(figsize=(3, 3))
+
+    mean = df.groupby(trial_column).mean(numeric_only=True)[simba_col]
+    sd = df.groupby(trial_column).std(numeric_only=True)[simba_col].values
+    sem = sd / np.sqrt(len(df.id.unique()))
+    x, y = (mean.index.values, mean.values)
+
+    ax.plot(x, y, color=color, linestyle="", marker="o", markersize=5,
+            markerfacecolor="white", alpha=0.5)
+    ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.1)
+
+    popt = fit_sigmoid(
+        df,
+        trial_column,
+        simba_col,
+        fit_to_raw_data=fit_to_raw_data,
+        initial_k=-1,
+        validate_fit=True,
+        return_param_order="legacy",
+    )
+    if np.all(np.isfinite(popt)):
+        y_fit = sigmoid(x, *popt)
+        ax.plot(x, y_fit, color=color, lw=2, linestyle="--")
+        if include_steepness:
+            ax.text(first_trial, np.max(y) * 0.9, f"k = {popt[2]:.2f}",
+                    color=color, fontsize=9, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    else:
+        print("Failed to fit sigmoid for behavior plot")
+
+    if simba_col == "simba_raw_mean":
+        ax.set_ylim(0, 0.4)  # Set y-limits for raw metric
+
+    return popt
+
+def make_realignment_panel_behav_and_da(data_for_figure, trial_col, da_column, simba_column,
+                           orig_ks=True,
+                           da_color="#1f77b4", behav_color="#2ca02c",
+                           da_label=True, behav_label=True):
+    
+    fig, ax = plt.subplots(figsize=(2.3, 2.1),
+                     gridspec_kw={"left": 0.3, "right": 0.7, "top": 0.8, "bottom": 0.25},)
+    
+    df = data_for_figure["df"]
+    
+    if orig_ks:
+        da_k = data_for_figure['k_da_orig']
+        behav_k = data_for_figure['k_behav_orig']
+        xlabel = "Trial"
+    else:
+        da_k = data_for_figure['k_da_realigned']
+        behav_k = data_for_figure['k_behav_realigned']
+        xlabel = "Trial (realigned)"
+
+    popt_orig = plot_auc_and_sigmoid(df, trial_col, da_column, ax=ax, include_steepness=False, color=da_color)
+    ax.set_xlabel(xlabel, fontsize=10)
+    if da_label:
+        ax.set_ylabel('Dopamine AUC', fontsize=10, color=da_color)
+    ax.tick_params(axis='y', labelcolor=da_color)
+    ax.text(0.5, 1.1,
+            f"Dopamine k = {da_k:.3f}\nBehavior k = {behav_k:.3f}",
+            ha="center", transform=ax.transAxes)
+
+    ax2 = ax.twinx()
+    plot_realigned_behaviour(df, trial_col, ax=ax2, include_steepness=False, simba_col=simba_column, color=behav_color)
+    if behav_label:
+        ax2.set_ylabel('App. behaviour', fontsize=10, color=behav_color)
+    ax2.tick_params(axis='y', labelcolor=behav_color)
+
+    ax2.set_ylim([-0.70, 1.1])
+    ax2.set_yticks([-0.5, 0, 0.5, 1.0], labels=["","","",""])
+    
+    sns.despine(ax=ax2, offset=5, left=True, right=False)
+    ax2.spines['right'].set_position(('outward', 5))
+
+    sns.despine(ax=ax, offset=5)
+    
+    return fig, ax, ax2
+
+def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column_to_plot, parameter_key,
+                           color="#1f77b4",
+                           da_label=True, behav_label=True):
+    
+    fig, ax = plt.subplots(figsize=(3.6, 2.1), ncols=2, sharey=True,
+                     gridspec_kw={"left": 0.3, "right": 0.9, "top": 0.8, "bottom": 0.25,
+                                  "wspace": 0.3},)
+    
+    df = data_for_figure["df"]
+    
+    if parameter_key == "behav":
+        ylabel = 'App. behaviour'
+        
+    else:  # Default to dopamine
+        ylabel = 'Dopamine AUC'
+    #     da_k = data_for_figure['k_da_orig']
+    #     behav_k = data_for_figure['k_behav_orig']
+    #     xlabel = "Trial"
+    # else:
+    #     da_k = data_for_figure['k_da_realigned']
+    #     behav_k = data_for_figure['k_behav_realigned']
+    #     xlabel = "Trial (realigned)"
+
+    plot_auc_and_sigmoid(df, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color)
+    ax[0].set_xlabel("Trial", fontsize=10)
+    ax[0].set_ylabel(ylabel, fontsize=10, color=color)
+
+    ax[0].tick_params(axis='y', labelcolor=color)
+    ax[0].text(0.5, 1.1,
+            f"k = {data_for_figure[f"k_{parameter_key}_orig"]:.3f}",
+            ha="center", transform=ax[0].transAxes)
+    
+    plot_auc_and_sigmoid(df, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color)
+    ax[1].set_xlabel("Trial (realigned)", fontsize=10)
+    ax[1].set_xticks([-10, 0, 20])
+
+    ax[1].tick_params(axis='y', labelcolor=color)
+    ax[1].text(0.5, 1.1,
+            f"k = {data_for_figure[f"k_{parameter_key}_realigned"]:.3f}",
+            ha="center", transform=ax[1].transAxes)
+
+    for axis in ax:
+        sns.despine(ax=axis, offset=5)
+    
+    return fig, ax
+
+def make_normalized_realignment_plot(data_for_figure, window_trials=np.arange(-5, 6),
+                                     da_color="#1f77b4", behav_color="#2ca02c"):
+    
+    y_dop_fit = sigmoid(window_trials, *data_for_figure["popt_da_realigned"])
+    y_behav_fit = sigmoid(window_trials, *data_for_figure["popt_behav_realigned"])
+    
+    dop_min, dop_max = y_dop_fit.min(), y_dop_fit.max()
+    behav_min, behav_max = y_behav_fit.min(), y_behav_fit.max()
+    
+    dopamine_norm = (
+    (y_dop_fit - dop_min) / (dop_max - dop_min)
+    if dop_max > dop_min
+    else np.ones_like(y_dop_fit) * 0.5
+    )
+    behavior_norm = (
+        (y_behav_fit - behav_min) / (behav_max - behav_min)
+        if behav_max > behav_min
+        else np.ones_like(y_behav_fit) * 0.5
+    )
+    
+    fig, ax = plt.subplots(figsize=(2.3, 2.1),
+                     gridspec_kw={"left": 0.25, "right": 0.75, "top": 0.8, "bottom": 0.25},)
+    
+    ax.plot(
+        window_trials,
+        dopamine_norm,
+        'o-',
+        color=da_color,
+        linewidth=2.5,
+        markersize=6,
+        label='Dopamine',
+        alpha=0.8,
+    )
+    ax.plot(
+        window_trials,
+        behavior_norm,
+        's-',
+        color=behav_color,
+        linewidth=2.5,
+        markersize=6,
+        label='Behavior',
+        alpha=0.8,
+    )
+    ax.axvline(0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
+    ax.set_xlabel('Trial from Transition', fontsize=10)
+    ax.set_ylabel('Normalized (0-1)', fontsize=10)
+    ax.set_ylim([-0.1, 1.1])
+    ax.set_xticks([-5, 0, 5])
+    sns.despine(ax=ax, offset=5)
+
+    return fig, ax
+    
