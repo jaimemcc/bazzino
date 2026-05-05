@@ -172,7 +172,7 @@ PARAMS = {
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": True,          # Skip Simba extraction, load from cache
     "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": False,    # Skip sigmoidal fitting, load from cache
+    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -1021,7 +1021,7 @@ def get_time_above_angvel_threshold(snips, threshold=1.0, start_bin=50, end_bin=
 def get_auc_by_window(snips, start_bin=50, end_bin=150):
     """Calculate per-trial AUC using trapezoidal integration over a bin window."""
     snips = np.asarray(snips, dtype=float)
-    return np.array([np.trapezoid(snips[i, start_bin:end_bin]) for i in range(len(snips))])
+    return np.array([np.trapezoid(snips[i, start_bin:end_bin])/10 for i in range(len(snips))])
 
 
 def get_mean_by_window(snips, start_bin=50, end_bin=150):
