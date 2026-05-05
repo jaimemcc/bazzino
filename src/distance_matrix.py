@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -100,4 +102,27 @@ def get_group_matrix_diffs(metric_matrix_for_distance, series_labels, group_to_r
     print(f"Distance metric: {DISTANCE_METRIC}")
     print(f"Mean off-diagonal distance: {distances[~np.eye(distances.shape[0], dtype=bool)].mean():.4f}")
     
-    return group_distance_matrix
+    return distances, group_distance_matrix
+
+def compute_mds_coordinates(distances):
+    distance_scale = np.nanmax(distances)
+
+    if distance_scale > 0:
+        distances_for_mds = distances / distance_scale
+    else:
+        distances_for_mds = distances.copy()
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.manifold._mds")
+        mds = MDS(
+            n_components=2,
+            metric=True,
+            dissimilarity="precomputed",
+            random_state=42,
+            n_init=8,
+            max_iter=500,
+            init="random",
+        )
+        coords = mds.fit_transform(distances_for_mds)
+        
+        return coords

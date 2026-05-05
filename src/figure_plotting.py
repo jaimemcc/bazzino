@@ -13,6 +13,8 @@ from pathlib import Path
 from scipy import stats
 from model_fit_helpers import fit_curve_series, _sigmoid_model, _exp_model
 
+from distance_matrix import compute_mds_coordinates, GROUP_COLORS, GROUP_ORDER, GROUP_LABELS
+
 
 def smooth_array(arr, window_size=5):
     """
@@ -954,11 +956,11 @@ def plot_lag_histogram(
 
     sns.despine(ax=ax)
     
-def make_euclidean_distance_heatmap_all_rats():
+def make_euclidean_distance_heatmap_all_rats(distances, group_boundaries, cmap="Oranges"):
     
     heatmap_vmin = np.nanpercentile(distances, 5)
     heatmap_vmax = np.nanpercentile(distances, 95)
-    cmap = plt.get_cmap("Oranges").reversed()
+    cmap = plt.get_cmap(cmap).reversed()
 
     # All-animal heatmap
     fig, ax = plt.subplots(figsize=(1.8, 1.8))
@@ -981,24 +983,53 @@ def make_euclidean_distance_heatmap_all_rats():
     return fig, ax
 
 
-def make_euclidean_distance_heatmap_averaged():
+def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Oranges"):
     
     # Group-averaged heatmap with separate colorbar
-    fig2, ax2 = plt.subplots(figsize=(1.8, 1.8))
-    fig2_cbar, ax2_cbar = plt.subplots(figsize=(0.18, 1.8))
+    fig, ax = plt.subplots(figsize=(1.8, 1.8))
+    fig_cbar, ax_cbar = plt.subplots(figsize=(0.18, 1.8))
+    cmap = plt.get_cmap(cmap).reversed()
 
     sns.heatmap(
         group_distance_matrix,
-        ax=ax2,
+        ax=ax,
         cmap=cmap,
         annot=False,
         fmt=".2f",
-        cbar_ax=ax2_cbar,
+        cbar_ax=ax_cbar,
         linewidths=1,
         linecolor="white",
     )
-    ax2.set_yticks([])
-    ax2.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xticks([])
+    ax_cbar.set_yticks([])
+    
+    return fig, ax, fig_cbar, ax_cbar
+
+
+def make_mds_plot(coords, group_to_row_indices):
+    fig, ax = plt.subplots(figsize=(1.8, 1.8),
+                       gridspec_kw={"left": 0.15, "bottom": 0.15})
+
+    group_centroids = []
+    for group_key in GROUP_ORDER:
+        row_idx = group_to_row_indices[group_key]
+        group_coords = coords[row_idx]
+        color = GROUP_COLORS[group_key]
+        centroid = group_coords.mean(axis=0)
+        group_centroids.append(centroid)
+
+        for coord in group_coords:
+            ax.plot([coord[0], centroid[0]], [coord[1], centroid[1]], color=color, alpha=0.3, zorder=0)
+
+        ax.scatter(group_coords[:, 0], group_coords[:, 1], s=40, edgecolor=color, facecolor="none")
+        ax.scatter(centroid[0], centroid[1], s=100, color=color)
+
+    ax.set_xlabel("MDS1")
+    ax.set_ylabel("MDS2")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    sns.despine(ax=ax, offset=5)
     
     return fig, ax
 
