@@ -107,7 +107,10 @@ from realignment_helpers import only_keep_complete_trials
 
 def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1, initial_behav_k=-1):
     """Compute shared fits/arrays used by all Figure 4B panels."""
+    
+    ntrials_for_slope = 5
     df_realigned = only_keep_complete_trials(df, realignment_col).copy()
+    df_reali_for_slope = df_realigned.query(f"{realignment_col} >= -{ntrials_for_slope} and {realignment_col} <= {ntrials_for_slope}").copy()
     
     ntrials = df_realigned[realignment_col].nunique()
     midway_point = int(df[df[realignment_col] == 0].trial.mean())
@@ -116,6 +119,9 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
     print(midway_point, min_trial, max_trial)
     
     df_original = df.query("trial >= @min_trial and trial <= @max_trial").copy()
+    
+    min_trial, max_trial = midway_point - ntrials_for_slope, midway_point + ntrials_for_slope
+    df_orig_for_slope = df_original.query("trial >= @min_trial and trial <= @max_trial").copy()
 
     popt_behav_orig = fit_sigmoid(df, "trial", simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
     popt_behav_realigned = fit_sigmoid(df_realigned, realignment_col, simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
@@ -129,7 +135,9 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
 
     return {
         "df_original": df_original,
+        "df_orig_for_slope": df_orig_for_slope,
         "df_realigned": df_realigned,
+        "df_reali_for_slope": df_reali_for_slope,
         "k_behav_orig": k_behav_orig,
         "k_behav_realigned": k_behav_realigned,
         "k_da_orig": k_da_orig,
@@ -138,9 +146,164 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
         "popt_behav_realigned": popt_behav_realigned,
         "popt_da_orig": popt_da_orig,
         "popt_da_realigned": popt_da_realigned,
+        "ntrials_for_slope": ntrials_for_slope,
     }
 
 
+
+# %%
+# new figure 3
+
+DA_COLUMN = "auc_snips"
+SIMBA_COLUMN = "simba_median_balance"
+REALIGNMENT_COLUMN = "realigned_trials_behav"
+RATS_TO_EXCLUDE = ["PB27", "PB71"]  # These rats have poor fits of behavioral data
+
+subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
+data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN)
+
+fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, SIMBA_COLUMN, "behav",
+                                          color=BEHAV_COLOR, do_not_plot_sigmoid=True)
+save_figure_atomic(fig, FIGSFOLDER / "fig3_realignment_behaviour")
+
+fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, DA_COLUMN, "da",
+                                          color=DA_COLOR, do_not_plot_sigmoid=True)
+save_figure_atomic(fig, FIGSFOLDER / "fig3_realignment_da")
+
+
+# %%
+from figure_plotting import make_realignment_slope_panel
+
+f, ax, slopes =make_realignment_slope_panel(data_for_figure, SIMBA_COLUMN, REALIGNMENT_COLUMN,
+                             color=BEHAV_COLOR)
+
+ax.set_yticks([-0.5, 0, 0.5, 1])
+ax.set_ylabel("App. behaviour")
+
+save_figure_atomic(f, FIGSFOLDER / "fig3_realignment_slope_behav")
+
+
+print("Behaviour slopes")
+print("Orig. slope = {: .3f}".format(slopes["trial"]["slope"]))
+print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
+
+f, ax, slopes =make_realignment_slope_panel(data_for_figure, DA_COLUMN, REALIGNMENT_COLUMN,
+                             color=DA_COLOR)
+
+
+# ax.set_yticks([-0.5, 0, 0.5, 1])
+ax.set_ylabel("Dopamine AUC")
+# ax.text(0.5, 0.9, "Orig. slope = {: .3f}".format(slopes["trial"]["slope"]), transform=ax.transAxes, ha="left", va="bottom", fontsize=10)
+# ax.text(0.5, 0.8, "Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]), transform=ax.transAxes, ha="left", va="bottom", fontsize=10)
+save_figure_atomic(f, FIGSFOLDER / "fig3_realignment_slope_da")
+
+print("Dopamine slopes")
+print("Orig. slope = {: .3f}".format(slopes["trial"]["slope"]))
+print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
+
+# %%
+from bootstrap_and_shuffle_helpers import get_bootstrapped_distribution, get_bootstrapped_distribution_using_slopes
+
+DA_COLUMN = "auc_snips"
+SIMBA_COLUMN = "simba_median_balance"
+REALIGNMENT_COLUMN = "realigned_trials_behav"
+N_BOOTSTRAPS = 100
+
+df_orig_for_slope = data_for_figure["df_orig_for_slope"]
+df_reali_for_slope = data_for_figure["df_reali_for_slope"]
+
+bootstrapped_behav_orig = get_bootstrapped_distribution_using_slopes(df_orig_for_slope, "trial", SIMBA_COLUMN, n_bootstraps=N_BOOTSTRAPS)
+bootstrapped_behav_realigned = get_bootstrapped_distribution_using_slopes(df_reali_for_slope, REALIGNMENT_COLUMN, SIMBA_COLUMN, n_bootstraps=N_BOOTSTRAPS)
+
+bootstrapped_da_orig = get_bootstrapped_distribution_using_slopes(df_orig_for_slope, "trial", DA_COLUMN, n_bootstraps=N_BOOTSTRAPS)
+bootstrapped_da_realigned = get_bootstrapped_distribution_using_slopes(df_reali_for_slope, REALIGNMENT_COLUMN, DA_COLUMN, n_bootstraps=N_BOOTSTRAPS)
+
+# %%
+
+box_data = [
+    bootstrapped_behav_orig,
+    bootstrapped_behav_realigned,
+]
+
+positions = [0, 1]
+labels = ["Behavior Original", "Behavior Realigned"]
+box_colors = ["grey", BEHAV_COLOR]
+
+f, ax = plt.subplots(figsize=(1.8, 2.1),
+                     gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.8, "bottom": 0.25},)
+bp = ax.boxplot(
+    box_data,
+    positions=positions,
+    widths=0.55,
+    showfliers=False,
+    patch_artist=True,
+)
+
+for patch, color in zip(bp["boxes"], box_colors):
+    patch.set_facecolor(color)
+    patch.set_alpha(0.6)
+    patch.set_edgecolor("black")
+
+for key in ["medians", "whiskers", "caps"]:
+    for artist in bp[key]:
+        artist.set_color("black")
+
+ax.set_xticks([])
+# ax.set_xticklabels(labels, rotation=25)
+ax.set_ylabel("Slope")
+ax.set_xlabel("")
+ax.set_yticks([-0.1, 0, 0.1])
+sns.despine(ax=ax, offset=5, bottom=True)
+
+save_figure_atomic(f, FIGSFOLDER / "fig3_realignment_bootstrap_behaviour")
+
+# %%
+box_data = [
+    bootstrapped_da_orig,
+    bootstrapped_da_realigned,
+]
+
+positions = [0, 1]
+labels = ["DA Original", "DA Realigned"]
+box_colors = ["grey", DA_COLOR]
+
+f, ax = plt.subplots(figsize=(1.8, 2.1),
+                     gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.8, "bottom": 0.25},)
+bp = ax.boxplot(
+    box_data,
+    positions=positions,
+    widths=0.55,
+    showfliers=False,
+    patch_artist=True,
+)
+
+for patch, color in zip(bp["boxes"], box_colors):
+    patch.set_facecolor(color)
+    patch.set_alpha(0.6)
+    patch.set_edgecolor("black")
+
+for key in ["medians", "whiskers", "caps"]:
+    for artist in bp[key]:
+        artist.set_color("black")
+
+ax.set_xticks([])
+# ax.set_xticklabels(labels, rotation=25)
+ax.set_ylabel("Slope")
+ax.set_xlabel("")
+ax.set_yticks([-1, 0, 1])
+sns.despine(ax=ax, offset=5, bottom=True)
+
+save_figure_atomic(f, FIGSFOLDER / "fig3_realignment_bootstrap_da")
+
+# %%
+stat, p = mannwhitneyu(bootstrapped_da_orig, bootstrapped_da_realigned, alternative="two-sided")
+print(f"Dopamine - Mann-Whitney U: U = {stat:.1f}, p = {p:.4f}")
+
+stat, p = mannwhitneyu(bootstrapped_behav_orig, bootstrapped_behav_realigned, alternative="two-sided")
+print(f"Behavior - Mann-Whitney U: U = {stat:.1f}, p = {p:.4f}")
+
+# %% [markdown]
+# ## Old stuff below here
 
 # %%
 # plot data religned to behavior, full dopamine
@@ -148,8 +311,9 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
 DA_COLUMN = "auc_snips"
 SIMBA_COLUMN = "simba_median_balance"
 REALIGNMENT_COLUMN = "realigned_trials_behav"
+RATS_TO_EXCLUDE = ["PB27", "PB71"]  # These rats have poor fits of behavioral data
 
-subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=["PB27", "PB71"], verbose=False)
+subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
 data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN)
 
 

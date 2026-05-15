@@ -1162,9 +1162,39 @@ def make_realignment_panel_behav_and_da(data_for_figure, trial_col, da_column, s
     
     return fig, ax, ax2
 
+def make_realignment_slope_panel(data_for_figure, column_to_plot, realignment_column, color=["#1f77b4"]):
+    fig, ax = plt.subplots(figsize=(1.8, 2.1),
+                     gridspec_kw={"left": 0.35, "right": 0.9, "top": 0.8, "bottom": 0.25},)
+    
+    ntrials_for_slope = data_for_figure["ntrials_for_slope"]
+    slopes = {}
+    for df, trial_col, alpha, linestyle, facecolor in zip([data_for_figure["df_orig_for_slope"], data_for_figure["df_reali_for_slope"]],
+                             ["trial", realignment_column],
+                             [0.3, 0.8],
+                             ["dashed", "solid"],
+                             ["white", color]):
+        
+        
+        
+        x_vals = np.arange(-ntrials_for_slope, ntrials_for_slope + 1)  # Trials from -ntrials_for_slope to +ntrials_for_slope
+        y_vals = df.groupby(trial_col)[column_to_plot].mean()
+        
+        for idx, trial in enumerate(df[trial_col].unique()):
+            trial_data = df.query(f"{trial_col} == @trial")[column_to_plot]
+            ax.plot(x_vals[idx], np.mean(trial_data), color=color, markerfacecolor=facecolor, marker="o", markersize=5, alpha=alpha)
+            
+        slope, intercept, r, p, std_err = stats.linregress(x_vals, y_vals)
+        ax.plot(x_vals, slope * x_vals + intercept, color=color, lw=1.5, linestyle=linestyle, alpha=alpha)
+        
+        slopes[trial_col] = {"slope": slope, "intercept": intercept, "r": r, "p": p, "std_err": std_err}
+        
+    sns.despine(ax=ax, offset=5)
+    ax.set_xlabel("Trial (from midpoint)", fontsize=10)
+        
+    return fig, ax, slopes
+
 def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column_to_plot, parameter_key,
-                           color="#1f77b4",
-                           da_label=True, behav_label=True, do_not_plot_sigmoid=False):
+                           color="#1f77b4", do_not_plot_sigmoid=False):
     
     fig, ax = plt.subplots(figsize=(3.4, 2.1), ncols=2, sharey=True,
                      gridspec_kw={"left": 0.2, "right": 0.9, "top": 0.8, "bottom": 0.25,
@@ -1182,12 +1212,13 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
     plot_auc_and_sigmoid(df_orig, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color,
                          do_not_plot_sigmoid=do_not_plot_sigmoid)
     ax[0].set_xlabel("Trial", fontsize=10)
-    ax[0].set_ylabel(ylabel, fontsize=10, color=color)
+    ax[0].set_ylabel(ylabel, fontsize=10)
 
-    ax[0].tick_params(axis='y', labelcolor=color)
-    ax[0].text(0.5, 1.1,
-            f"k = {data_for_figure[f"k_{parameter_key}_orig"]:.3f}",
-            ha="center", transform=ax[0].transAxes)
+    ax[0].tick_params(axis='y')
+    if not do_not_plot_sigmoid:
+        ax[0].text(0.5, 1.1,
+                f"k = {data_for_figure[f"k_{parameter_key}_orig"]:.3f}",
+                ha="center", transform=ax[0].transAxes)
     
     plot_auc_and_sigmoid(df_realigned, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color,
                          do_not_plot_sigmoid=do_not_plot_sigmoid)
@@ -1196,10 +1227,11 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
     
     ax[1].axvline(0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
 
-    ax[1].tick_params(axis='y', labelcolor=color)
-    ax[1].text(0.5, 1.1,
-            f"k = {data_for_figure[f"k_{parameter_key}_realigned"]:.3f}",
-            ha="center", transform=ax[1].transAxes)
+    ax[1].tick_params(axis='y')
+    if not do_not_plot_sigmoid:
+        ax[1].text(0.5, 1.1,
+                f"k = {data_for_figure[f"k_{parameter_key}_realigned"]:.3f}",
+                ha="center", transform=ax[1].transAxes)
 
     for axis in ax:
         sns.despine(ax=axis, offset=5)
