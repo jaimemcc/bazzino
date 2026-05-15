@@ -202,6 +202,9 @@ for idx, rat in enumerate(rats[:]):
     simba_median = x_array.query("id == @rat and condition == 'deplete'").simba_median_balance.values
     auc_da = x_array.query("id == @rat and condition == 'deplete'").auc_snips.values
     da_norm = norm_signal(auc_da, smooth=False)
+    
+    behav_transition = x_array.query("id == @rat and condition == 'deplete' and realigned_trials_behav == 0").trial.values[0]
+    print(f"Rat {rat} transition trial: {behav_transition}")
 
     vlim_behav = scale_vlim_to_data(behav_data, percentile=90)
     vlim_photo = scale_vlim_to_data(photo_data, percentile=90)
@@ -213,10 +216,12 @@ for idx, rat in enumerate(rats[:]):
     hm.collections[0].set_rasterized(True)
     ax[idx, 0].set_yticks([0, 25, 49], labels=["0", rat, "49"], rotation=0)
     ax[idx, 0].set_xticks([])
+    ax[idx, 0].scatter(200, behav_transition, color="k", marker="<", s=50, zorder=5, clip_on=False)
 
 
     ax[idx, 1].plot(simba_median, color=colors[3])
     ax[idx, 1].set_ylim(-1.05, 1.05)
+    ax[idx, 1].axvline(behav_transition, color="k", linestyle="--", alpha=0.5)
 
     hm = sns.heatmap(photo_data, ax=ax[idx, 3], cmap=custom_cmap,
                 vmin=vlim_photo[0], vmax=vlim_photo[1],

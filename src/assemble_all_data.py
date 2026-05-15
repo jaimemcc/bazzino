@@ -165,10 +165,11 @@ PARAMS = {
     # ── Behavioral transition method ──
     # Selects how per-rat behavioral transition trials are determined:
     #   - "sigmoid": fit a continuous sigmoid to the signal (existing default)
-    #   - "max_velocity": use the trial of maximum negative derivative (steepest decline)
-    "behavior_transition_method": "sigmoid",
+    #   - "max_velocity" (or legacy alias "velocity"): use the trial of
+    #     maximum negative derivative (steepest decline)
+    "behavior_transition_method": "velocity",
     # Smoothing window (must be odd) for the derivative when using "max_velocity".
-    "behavior_velocity_smoothing_window": 3,
+    "behavior_velocity_smoothing_window": 5,
 
     # ── Output ──
     "output_filename": "assembled_data.pickle",
@@ -181,7 +182,7 @@ PARAMS = {
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": True,          # Skip Simba extraction, load from cache
     "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
-    "cache_transitions": True,    # Skip sigmoidal fitting, load from cache
+    "cache_transitions": False,    # Skip transition fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
@@ -1197,6 +1198,73 @@ def _add_behavior_transition_columns(df, params):
     return df
 
 
+def _normalize_behavior_transition_method(method):
+    """Normalize behavior transition method names to canonical values."""
+    if method is None:
+        return "sigmoid"
+
+    method_norm = str(method).strip().lower()
+    aliases = {
+        "velocity": "max_velocity",
+        "max_velocity": "max_velocity",
+        "sigmoid": "sigmoid",
+    }
+    if method_norm not in aliases:
+        raise ValueError(
+            f"Unknown behavior_transition_method '{method}'. "
+            "Expected one of: sigmoid, max_velocity, velocity"
+        )
+    return aliases[method_norm]
+
+
+def _validate_transition_params(params):
+    """Validate transition-related parameter values with clear errors."""
+    allowed_methods = ["sigmoid", "max_velocity", "velocity"]
+    allowed_modes = ["median_balance", "binarized", "quantized"]
+
+    method_raw = params.get("behavior_transition_method", "sigmoid")
+    mode_raw = params.get("behavior_transition_mode", "median_balance")
+
+    method_norm = str(method_raw).strip().lower()
+    mode_norm = str(mode_raw).strip().lower()
+
+    if method_norm not in allowed_methods:
+        print(
+            "ERROR: Invalid behavior_transition_method "
+            f"'{method_raw}'. Allowed values: {allowed_methods}"
+        )
+        raise ValueError(
+            f"Invalid behavior_transition_method '{method_raw}'. "
+            f"Allowed values: {allowed_methods}"
+        )
+
+    if mode_norm not in allowed_modes:
+        print(
+            "ERROR: Invalid behavior_transition_mode "
+            f"'{mode_raw}'. Allowed values: {allowed_modes}"
+        )
+        raise ValueError(
+            f"Invalid behavior_transition_mode '{mode_raw}'. "
+            f"Allowed values: {allowed_modes}"
+        )
+
+    window = int(params.get("behavior_velocity_smoothing_window", 3))
+    if window < 1:
+        print(
+            "ERROR: Invalid behavior_velocity_smoothing_window "
+            f"'{window}'. Must be >= 1."
+        )
+        raise ValueError(
+            "behavior_velocity_smoothing_window must be >= 1"
+        )
+
+    if method_norm in ("max_velocity", "velocity") and window % 2 == 0:
+        print(
+            "WARNING: behavior_velocity_smoothing_window is even "
+            f"({window}); code will auto-adjust to {window + 1} for symmetric smoothing."
+        )
+
+
 def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw=None):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
@@ -1294,6 +1362,8 @@ def run_pipeline(params=None):
     """Run the full data assembly pipeline."""
     if params is None:
         params = PARAMS
+
+    _validate_transition_params(params)
 
     print("=" * 60)
     print("BAZZINO DATA ASSEMBLY PIPELINE")
@@ -1449,7 +1519,11 @@ def run_pipeline(params=None):
         if cached_method is None and "_cached_params" in cached:
             cached_method = cached["_cached_params"].get("behavior_transition_method")
 
-    current_method = params.get("behavior_transition_method", "sigmoid")
+    current_method = _normalize_behavior_transition_method(
+        params.get("behavior_transition_method", "sigmoid")
+    )
+    if cached_method is not None:
+        cached_method = _normalize_behavior_transition_method(cached_method)
     current_mode = params.get("behavior_transition_mode", "median_balance")
     cache_valid = (
         cached is not None
@@ -1521,7 +1595,7 @@ def run_pipeline(params=None):
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
         "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
         "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
-        "behavior_transition_method": params.get("behavior_transition_method", "sigmoid"),
+        "behavior_transition_method": current_method,
         "behavior_velocity_smoothing_window": params.get("behavior_velocity_smoothing_window", 3),
         "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
         "behavior_transition_low_threshold": params.get("behavior_transition_low_threshold", -0.7),

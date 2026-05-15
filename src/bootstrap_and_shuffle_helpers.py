@@ -1,4 +1,3 @@
-import random
 import pandas as pd
 import numpy as np
 from scipy import stats
@@ -8,10 +7,10 @@ from model_fit_helpers import fit_sigmoid
 
 def get_bootstrapped_distribution(df, trial_col, value_col, n_bootstraps=1000, random_seed=42):
 
-    random.seed(random_seed)
-    rats = df.id.unique()
-    
-    random_lists = [random.choices(list(rats), k=len(rats)) for _ in range(n_bootstraps)]
+    rng = np.random.default_rng(random_seed)
+    rats = np.asarray(df.id.unique())
+
+    random_lists = [rng.choice(rats, size=len(rats), replace=True) for _ in range(n_bootstraps)]
     bootstrapped_ks = []
     
     for i, random_list in enumerate(random_lists, 1):
@@ -32,10 +31,10 @@ def get_bootstrapped_distribution(df, trial_col, value_col, n_bootstraps=1000, r
 
 def get_bootstrapped_distribution_using_slopes(df, trial_col, value_col, n_bootstraps=1000, random_seed=42):
 
-    random.seed(random_seed)
-    rats = df.id.unique()
-    
-    random_lists = [random.choices(list(rats), k=len(rats)) for _ in range(n_bootstraps)]
+    rng = np.random.default_rng(random_seed)
+    rats = np.asarray(df.id.unique())
+
+    random_lists = [rng.choice(rats, size=len(rats), replace=True) for _ in range(n_bootstraps)]
     bootstrapped_slopes = []
     
     for i, random_list in enumerate(random_lists, 1):
