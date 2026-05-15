@@ -181,3 +181,9 @@ results/*
 paper/figs/panels/*
 data/PB*
 
+
+# Notebook binaries (track .py via Jupytext instead)
+notebooks/**/*.ipynb
+
+# Jupyter
+.ipynb_checkpoints/
