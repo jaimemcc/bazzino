@@ -2706,3 +2706,225 @@ n_required
 # 2) binarized using signtest (70%) vals
 # 3) quantized (using 1, 0, -1) based on signtest
 
+
+# %% [markdown]
+# ## Analyze Velocity of Change (Derivative) of Behavior
+#
+# Calculate the derivative of behavior over trials, smooth by a few time bins, and find the point of steepest change for each rat.
+
+# %%
+from scipy.ndimage import uniform_filter1d
+
+# Set parameters for smoothing and analysis
+smoothing_window = 5  # Number of trials to smooth over (should be odd)
+
+def compute_smoothed_derivative(signal, window_size=3):
+    """
+    Compute the derivative of a signal and smooth it.
+    
+    Parameters:
+    -----------
+    signal : array-like
+        The behavior signal (e.g., simba_median_balance values)
+    window_size : int
+        Size of smoothing window (should be odd for symmetry)
+        
+    Returns:
+    --------
+    derivative : array
+        Smoothed derivative of the signal
+    max_velocity_idx : int
+        Index of maximum negative velocity (most negative value)
+    max_velocity : float
+        Maximum negative velocity value (most negative)
+    """
+    # Compute raw derivative using differences
+    derivative = np.diff(signal, prepend=signal[0])
+    
+    # Smooth the derivative
+    smoothed_deriv = uniform_filter1d(derivative, size=window_size, mode='nearest')
+    
+    # Find point of most negative velocity (steepest negative change)
+    max_velocity_idx = np.argmin(smoothed_deriv)
+    max_velocity = smoothed_deriv[max_velocity_idx]
+    
+    return smoothed_deriv, max_velocity_idx, max_velocity
+
+# Calculate derivatives for each rat and behavior metric
+df_dep_45 = x_array.query("condition == 'deplete' & infusiontype == '45NaCl'").copy()
+
+velocity_results = []
+
+for rat in df_dep_45.id.unique():
+    rat_data = df_dep_45.loc[df_dep_45.id == rat].copy()
+    rat_data = rat_data.sort_values('trial')
+    
+    # Analyze simba_median_balance
+    simba_signal = rat_data['simba_median_balance'].to_numpy()
+    deriv_simba, max_idx_simba, max_vel_simba = compute_smoothed_derivative(
+        simba_signal, window_size=smoothing_window
+    )
+    
+    velocity_results.append({
+        'id': rat,
+        'n_trials': len(rat_data),
+        'simba_max_velocity_trial': rat_data.iloc[max_idx_simba]['trial'],
+        'simba_max_velocity_value': max_vel_simba,
+    })
+
+velocity_df = pd.DataFrame(velocity_results)
+print("Summary of maximum velocity points by rat:")
+print(velocity_df.to_string())
+print(f"\nMean trial of max simba_median_balance velocity: {velocity_df['simba_max_velocity_trial'].mean():.1f}")
+
+# %%
+# Visualize behavior and velocity of change for each rat
+fig, axes = plt.subplots(len(df_dep_45.id.unique()), 2, figsize=(14, 2.5*len(df_dep_45.id.unique())))
+
+if len(df_dep_45.id.unique()) == 1:
+    axes = axes.reshape(1, -1)
+
+for row, rat in enumerate(sorted(df_dep_45.id.unique())):
+    rat_data = df_dep_45.loc[df_dep_45.id == rat].copy()
+    rat_data = rat_data.sort_values('trial')
+    
+    trial_nums = rat_data['trial'].to_numpy()
+    
+    # Left plot: simba_median_balance with velocity overlay
+    simba_signal = rat_data['simba_median_balance'].to_numpy()
+    deriv_simba, max_idx_simba, max_vel_simba = compute_smoothed_derivative(
+        simba_signal, window_size=smoothing_window
+    )
+    
+    ax_simba = axes[row, 0]
+    ax_simba.plot(trial_nums, simba_signal, marker='o', linestyle='-', 
+                   color=colors[0], alpha=0.7, label='SIMBA Median Balance', markersize=4)
+    ax_simba.axvline(trial_nums[max_idx_simba], color=colors[2], linestyle='--', 
+                      linewidth=2, alpha=0.7, label=f'Max velocity (trial {int(trial_nums[max_idx_simba])})')
+    ax_simba.set_ylabel('SIMBA Median Balance')
+    ax_simba.set_xlabel('Trial Number')
+    ax_simba.set_title(f'Rat {rat}: SIMBA Median Balance')
+    ax_simba.legend(fontsize=9)
+    sns.despine(ax=ax_simba, offset=5)
+    
+    # Right plot: velocity of change
+    ax_velocity = axes[row, 1]
+    ax_velocity.plot(trial_nums, deriv_simba, marker='o', linestyle='-', 
+                    color=colors[1], alpha=0.7, label='Smoothed Derivative', markersize=4)
+    ax_velocity.axhline(0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
+    ax_velocity.axvline(trial_nums[max_idx_simba], color=colors[2], linestyle='--', 
+                       linewidth=2, alpha=0.7, label=f'Max velocity')
+    ax_velocity.scatter(trial_nums[max_idx_simba], max_vel_simba, 
+                       color=colors[2], s=100, marker='*', zorder=5, edgecolors='black', linewidth=1)
+    ax_velocity.set_ylabel('Rate of Change')
+    ax_velocity.set_xlabel('Trial Number')
+    ax_velocity.set_title(f'Velocity of Change (smoothing window={smoothing_window})')
+    ax_velocity.legend(fontsize=9)
+    sns.despine(ax=ax_velocity, offset=5)
+
+fig.suptitle("Behavior Dynamics: Signal and Velocity of Change", y=1.00)
+fig.tight_layout()
+plt.show()
+
+# %%
+# Visualize SIMBA median balance transition points
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+# Plot 1: Transition points across rats
+rats = velocity_df['id'].values
+x_pos = np.arange(len(rats))
+
+ax1.bar(x_pos, velocity_df['simba_max_velocity_trial'], 
+        label='Max Velocity Trial', color=colors[1], alpha=0.8)
+
+ax1.set_xlabel('Rat ID')
+ax1.set_ylabel('Trial Number of Maximum Velocity')
+ax1.set_title('SIMBA Median Balance: Max Velocity Transition Points')
+ax1.set_xticks(x_pos)
+ax1.set_xticklabels(rats, rotation=45)
+ax1.legend()
+sns.despine(ax=ax1, offset=5)
+
+# Plot 2: Distribution of velocity values at transition points
+ax2.scatter(velocity_df['simba_max_velocity_trial'], 
+           velocity_df['simba_max_velocity_value'],
+           s=150, alpha=0.7, color=colors[1], edgecolors='black', linewidth=1)
+for idx, row in velocity_df.iterrows():
+    ax2.annotate(f"PB{row['id']}", 
+                (row['simba_max_velocity_trial'], row['simba_max_velocity_value']),
+                fontsize=9, ha='center', va='bottom')
+
+ax2.set_xlabel('Trial Number of Max Velocity')
+ax2.set_ylabel('Velocity Magnitude')
+ax2.set_title('SIMBA Median Balance: Velocity Magnitude at Transition')
+sns.despine(ax=ax2, offset=5)
+
+fig.tight_layout()
+plt.show()
+
+# %%
+# Explore sensitivity to smoothing window size
+window_sizes = [1, 3, 5, 7, 9]
+sensitivity_results = []
+
+for window_size in window_sizes:
+    for rat in df_dep_45.id.unique():
+        rat_data = df_dep_45.loc[df_dep_45.id == rat].copy()
+        rat_data = rat_data.sort_values('trial')
+        
+        simba_signal = rat_data['simba_median_balance'].to_numpy()
+        deriv_simba, max_idx_simba, max_vel_simba = compute_smoothed_derivative(
+            simba_signal, window_size=window_size
+        )
+        
+        sensitivity_results.append({
+            'id': rat,
+            'window_size': window_size,
+            'max_velocity_trial': rat_data.iloc[max_idx_simba]['trial'],
+            'max_velocity_value': max_vel_simba,
+        })
+
+sensitivity_df = pd.DataFrame(sensitivity_results)
+
+# Visualize sensitivity to window size
+fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+
+# Plot 1: How transition trial varies with window size
+for rat in df_dep_45.id.unique():
+    rat_sens = sensitivity_df[sensitivity_df['id'] == rat]
+    axes[0].plot(rat_sens['window_size'], rat_sens['max_velocity_trial'], 
+                marker='o', label=f'PB{rat}', alpha=0.7)
+
+axes[0].set_xlabel('Smoothing Window Size (trials)')
+axes[0].set_ylabel('Trial Number of Max Velocity')
+axes[0].set_title('Stability of Transition Points vs. Smoothing Window')
+axes[0].set_xticks(window_sizes)
+axes[0].legend(fontsize=9)
+axes[0].grid(True, alpha=0.3)
+sns.despine(ax=axes[0], offset=5)
+
+# Plot 2: How velocity magnitude varies with window size
+for rat in df_dep_45.id.unique():
+    rat_sens = sensitivity_df[sensitivity_df['id'] == rat]
+    axes[1].plot(rat_sens['window_size'], rat_sens['max_velocity_value'], 
+                marker='s', label=f'PB{rat}', alpha=0.7)
+
+axes[1].set_xlabel('Smoothing Window Size (trials)')
+axes[1].set_ylabel('Max Velocity Magnitude')
+axes[1].set_title('Velocity Magnitude vs. Smoothing Window')
+axes[1].set_xticks(window_sizes)
+axes[1].legend(fontsize=9)
+axes[1].grid(True, alpha=0.3)
+sns.despine(ax=axes[1], offset=5)
+
+fig.tight_layout()
+plt.show()
+
+print("\nSensitivity Analysis Summary:")
+print("Window size vs. stability of transition point detection")
+for rat in df_dep_45.id.unique():
+    rat_sens = sensitivity_df[sensitivity_df['id'] == rat]
+    trial_range = rat_sens['max_velocity_trial'].max() - rat_sens['max_velocity_trial'].min()
+    print(f"  Rat {rat}: Trial range = {trial_range} (min={rat_sens['max_velocity_trial'].min()}, max={rat_sens['max_velocity_trial'].max()})")
+
+# %%

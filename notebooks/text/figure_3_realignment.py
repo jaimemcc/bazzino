@@ -105,10 +105,9 @@ x_array.columns
 ## prepare shared data
 from realignment_helpers import only_keep_complete_trials
 
-def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1, initial_behav_k=-1):
+def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1, initial_behav_k=-1, ntrials_for_slope=5):
     """Compute shared fits/arrays used by all Figure 4B panels."""
-    
-    ntrials_for_slope = 5
+
     df_realigned = only_keep_complete_trials(df, realignment_col).copy()
     df_reali_for_slope = df_realigned.query(f"{realignment_col} >= -{ntrials_for_slope} and {realignment_col} <= {ntrials_for_slope}").copy()
     
@@ -204,10 +203,14 @@ print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"])
 # %%
 from bootstrap_and_shuffle_helpers import get_bootstrapped_distribution, get_bootstrapped_distribution_using_slopes
 
-DA_COLUMN = "auc_snips"
-SIMBA_COLUMN = "simba_median_balance"
-REALIGNMENT_COLUMN = "realigned_trials_behav"
 N_BOOTSTRAPS = 100
+
+# can change these for quick testing but make sure to comment again to ensure that values from plots above are carried through to the bootstrapped distributions
+# DA_COLUMN = "auc_snips"
+# SIMBA_COLUMN = "simba_median_balance"
+# REALIGNMENT_COLUMN = "realigned_trials_behav"
+# subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
+# data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN, ntrials_for_slope=5)
 
 df_orig_for_slope = data_for_figure["df_orig_for_slope"]
 df_reali_for_slope = data_for_figure["df_reali_for_slope"]
@@ -301,6 +304,87 @@ print(f"Dopamine - Mann-Whitney U: U = {stat:.1f}, p = {p:.4f}")
 
 stat, p = mannwhitneyu(bootstrapped_behav_orig, bootstrapped_behav_realigned, alternative="two-sided")
 print(f"Behavior - Mann-Whitney U: U = {stat:.1f}, p = {p:.4f}")
+
+
+# %%
+# Paired bootstrap-difference inference (realigned - original)
+def paired_bootstrap_diff_stats(orig, realigned, label, ci=(2.5, 97.5)):
+    orig = np.asarray(orig, dtype=float)
+    realigned = np.asarray(realigned, dtype=float)
+
+    if orig.shape != realigned.shape:
+        n = min(orig.size, realigned.size)
+        print(f"{label}: length mismatch (orig={orig.size}, realigned={realigned.size}); trimming to n={n}")
+        orig = orig[:n]
+        realigned = realigned[:n]
+
+    valid = np.isfinite(orig) & np.isfinite(realigned)
+    deltas = realigned[valid] - orig[valid]
+    n = deltas.size
+
+    if n == 0:
+        print(f"{label}: no valid paired bootstrap samples")
+        return np.array([])
+
+    delta_mean = np.mean(deltas)
+    ci_low, ci_high = np.percentile(deltas, ci)
+
+    # Two-sided bootstrap p-value for H0: delta == 0
+    p_left = (np.sum(deltas <= 0) + 1) / (n + 1)
+    p_right = (np.sum(deltas >= 0) + 1) / (n + 1)
+    p_two_sided = min(1.0, 2 * min(p_left, p_right))
+
+    print(f"{label} (paired bootstrap delta = realigned - original)")
+    print(f"  n valid pairs = {n}")
+    print(f"  mean delta = {delta_mean:.6f}")
+    print(f"  95% CI = [{ci_low:.6f}, {ci_high:.6f}]")
+    print(f"  two-sided bootstrap p = {p_two_sided:.6f}")
+
+    return deltas
+
+
+delta_da = paired_bootstrap_diff_stats(
+    bootstrapped_da_orig,
+    bootstrapped_da_realigned,
+    label="Dopamine",
+)
+
+delta_behav = paired_bootstrap_diff_stats(
+    bootstrapped_behav_orig,
+    bootstrapped_behav_realigned,
+    label="Behavior",
+)
+
+# %%
+BANDWIDTH=1
+
+fig, ax = plt.subplots(figsize=(2.3, 2.1),
+                     gridspec_kw={"left": 0.25, "right": 0.9, "top": 0.8, "bottom": 0.25})
+
+sns.kdeplot(bootstrapped_behav_orig, color="grey", ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
+sns.kdeplot(bootstrapped_behav_realigned, color=BEHAV_COLOR, ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
+
+# ax.set_xlabel("Steepness (k)")
+# ax.set_xticks([-5, 0])
+# ax.set_xlim(-5.5, 0.5)
+# ax.set_yticks([0, 1])
+sns.despine(ax=ax, offset=5)
+
+save_figure_atomic(fig, FIGSFOLDER / "fig3_realigned_bootstrap_kde_behaviour")
+
+fig, ax = plt.subplots(figsize=(2.3, 2.1),
+                     gridspec_kw={"left": 0.25, "right": 0.9, "top": 0.8, "bottom": 0.25})
+
+sns.kdeplot(bootstrapped_da_orig, color="grey", ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
+sns.kdeplot(bootstrapped_da_realigned, color=DA_COLOR, ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
+
+# ax.set_xlabel("Steepness (k)")
+# ax.set_xticks([-5, 0])
+# ax.set_xlim(-5.5, 0.5)
+# ax.set_yticks([0, 1])
+sns.despine(ax=ax, offset=5)
+
+save_figure_atomic(fig, FIGSFOLDER / "fig3_realigned_bootstrap_kde_dopamine")
 
 # %% [markdown]
 # ## Old stuff below here
@@ -1601,3 +1685,135 @@ else:
     print(f"  Realigned rows used: {len(realigned_complete)}")
     print(f"  Dopamine k: original={k_do:.4f}, realigned={k_dr:.4f}, delta={k_dr - k_do:.4f}")
     print(f"  Behavior k: original={k_bo:.4f}, realigned={k_br:.4f}, delta={k_br - k_bo:.4f}")
+
+# %% [markdown]
+# ## Velocity-Based Transition Detection
+#
+# Analyze transition points using maximum negative velocity in the SIMBA median balance signal.
+
+# %%
+from scipy.ndimage import uniform_filter1d
+
+# Compute velocity-based transition points for deplete_45 group
+df_dep_45 = x_array.query("condition == 'deplete' & infusiontype == '45NaCl'").copy()
+
+def compute_smoothed_derivative(signal, window_size=3):
+    """Compute smoothed derivative and find max negative velocity."""
+    derivative = np.diff(signal, prepend=signal[0])
+    smoothed_deriv = uniform_filter1d(derivative, size=window_size, mode='nearest')
+    max_velocity_idx = np.argmin(smoothed_deriv)
+    max_velocity = smoothed_deriv[max_velocity_idx]
+    return smoothed_deriv, max_velocity_idx, max_velocity
+
+smoothing_window = 3
+velocity_results = []
+
+for rat in df_dep_45.id.unique():
+    rat_data = df_dep_45.loc[df_dep_45.id == rat].copy()
+    rat_data = rat_data.sort_values('trial')
+    
+    simba_signal = rat_data['simba_median_balance'].to_numpy()
+    deriv_simba, max_idx_simba, max_vel_simba = compute_smoothed_derivative(
+        simba_signal, window_size=smoothing_window
+    )
+    
+    velocity_results.append({
+        'id': rat,
+        'n_trials': len(rat_data),
+        'velocity_trial': rat_data.iloc[max_idx_simba]['trial'],
+        'velocity_value': max_vel_simba,
+    })
+
+velocity_df = pd.DataFrame(velocity_results)
+
+print("\nVelocity-Based Transition Points:")
+print(velocity_df[['id', 'velocity_trial', 'velocity_value']].to_string())
+print(f"\nMean transition trial: {velocity_df['velocity_trial'].mean():.1f} ± {velocity_df['velocity_trial'].std():.1f}")
+print(f"Range: {velocity_df['velocity_trial'].min():.0f} to {velocity_df['velocity_trial'].max():.0f}")
+
+# %%
+# Visualize velocity-based transition points
+fig, axes = plt.subplots(len(df_dep_45.id.unique()), 1, figsize=(14, 2.5*len(df_dep_45.id.unique())))
+
+if len(df_dep_45.id.unique()) == 1:
+    axes = [axes]
+
+for row, rat in enumerate(sorted(df_dep_45.id.unique())):
+    rat_data = df_dep_45.loc[df_dep_45.id == rat].copy()
+    rat_data = rat_data.sort_values('trial')
+    
+    ax = axes[row]
+    
+    # Plot the SIMBA median balance signal
+    trial_nums = rat_data['trial'].to_numpy()
+    simba_signal = rat_data['simba_median_balance'].to_numpy()
+    
+    ax.plot(trial_nums, simba_signal, marker='o', linestyle='-', 
+           color=COLORS[0], alpha=0.7, linewidth=2, markersize=5, label='SIMBA Median Balance')
+    
+    # Compute and plot velocity
+    deriv_simba, max_idx_simba, max_vel_simba = compute_smoothed_derivative(
+        simba_signal, window_size=smoothing_window
+    )
+    
+    ax_vel = ax.twinx()
+    ax_vel.plot(trial_nums, deriv_simba, marker='s', linestyle='--', 
+               color=COLORS[1], alpha=0.6, linewidth=2, markersize=4, label='Velocity (derivative)')
+    ax_vel.axhline(0, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
+    
+    # Mark maximum negative velocity
+    vel_trial = trial_nums[max_idx_simba]
+    ax_vel.axvline(vel_trial, color=COLORS[2], linestyle=':', linewidth=2.5, 
+                  alpha=0.8, label=f'Max Velocity (trial {int(vel_trial)})')
+    ax_vel.scatter([vel_trial], [max_vel_simba], 
+                  color=COLORS[2], s=150, marker='*', zorder=5, edgecolors='black', linewidth=1.5)
+    
+    ax.set_ylabel('SIMBA Median Balance', fontsize=11)
+    ax_vel.set_ylabel('Velocity (derivative)', fontsize=11, color=COLORS[1])
+    ax.set_xlabel('Trial Number', fontsize=11)
+    ax.set_title(f'Rat {rat}: Maximum Negative Velocity Detection', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.2)
+    
+    # Combine legends
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax_vel.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=10, loc='best')
+    
+    sns.despine(ax=ax, offset=5)
+    ax_vel.spines["right"].set_visible(True)
+
+fig.suptitle("Velocity-Based Transition Detection in SIMBA Median Balance", y=1.00, fontsize=13, fontweight='bold')
+fig.tight_layout()
+plt.show()
+
+# %%
+# Summary of velocity-based transition points
+fig, ax = plt.subplots(figsize=(10, 5))
+
+rats = velocity_df['id'].values
+x_pos = np.arange(len(rats))
+
+bars = ax.bar(x_pos, velocity_df['velocity_trial'], color=COLORS[1], alpha=0.8, edgecolor='black', linewidth=1.5)
+
+# Add value labels on bars
+for i, (bar, val) in enumerate(zip(bars, velocity_df['velocity_trial'])):
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, 
+           f'{int(val)}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+ax.set_xlabel('Rat ID', fontsize=12, fontweight='bold')
+ax.set_ylabel('Trial Number of Maximum Negative Velocity', fontsize=12, fontweight='bold')
+ax.set_title('Velocity-Based Transition Detection Summary', fontsize=13, fontweight='bold')
+ax.set_xticks(x_pos)
+ax.set_xticklabels([f'PB{int(r)}' for r in rats], rotation=45)
+ax.grid(True, alpha=0.2, axis='y')
+sns.despine(ax=ax, offset=5)
+
+fig.tight_layout()
+plt.show()
+
+print("\nVelocity-Based Transition Detection Summary:")
+print(velocity_df.to_string(index=False))
+print(f"\nMean transition trial: {velocity_df['velocity_trial'].mean():.1f}")
+print(f"Std deviation: {velocity_df['velocity_trial'].std():.1f}")
+print(f"Range: {velocity_df['velocity_trial'].min():.0f} - {velocity_df['velocity_trial'].max():.0f}")
+

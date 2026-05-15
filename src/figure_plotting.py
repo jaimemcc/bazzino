@@ -987,7 +987,8 @@ def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Orange
     
     # Group-averaged heatmap with separate colorbar
     fig, ax = plt.subplots(figsize=(1.8, 1.8))
-    fig_cbar, ax_cbar = plt.subplots(figsize=(0.18, 1.8))
+    fig_cbar, ax_cbar = plt.subplots(figsize=(0.35, 1.8),
+                                     gridspec_kw={"right": 0.4})
     cmap = plt.get_cmap(cmap).reversed()
 
     sns.heatmap(
@@ -1002,15 +1003,23 @@ def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Orange
     )
     ax.set_yticks([])
     ax.set_xticks([])
-    ax_cbar.set_yticks([])
+    ax_cbar.tick_params(length=0)
+    # ax_cbar.set_yticks([])
     
     return fig, ax, fig_cbar, ax_cbar
 
 
-def make_mds_plot(coords, group_to_row_indices):
+def make_mds_plot(coords, group_to_row_indices, reverse_axes=None):
     fig, ax = plt.subplots(figsize=(1.8, 1.8),
                        gridspec_kw={"left": 0.15, "bottom": 0.15})
 
+    if reverse_axes == "x":
+        coords[:, 0] = -coords[:, 0]
+    elif reverse_axes == "y":
+        coords[:, 1] = -coords[:, 1]
+    elif reverse_axes == "both":
+        coords = -coords
+        
     group_centroids = []
     for group_key in GROUP_ORDER:
         row_idx = group_to_row_indices[group_key]

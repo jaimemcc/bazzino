@@ -453,6 +453,8 @@ if SAVE_FIGS:
     save_figure_atomic(fig, "fig1_heatmap_euclidean_all_rats", FIGSFOLDER)
     
 fig, ax, fig_cbar, ax_cbar = make_euclidean_distance_heatmap_averaged(group_distance_matrix)
+ax_cbar.set_ylim([4,7])
+
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig1_heatmap_euclidean_averaged", FIGSFOLDER)
     save_figure_atomic(fig_cbar, "fig1_heatmap_euclidean_averaged_cbar", FIGSFOLDER)
@@ -461,7 +463,7 @@ if SAVE_FIGS:
 # make MDS plot for photometry data
 coords = compute_mds_coordinates(distances)
 
-fig, ax = make_mds_plot(coords, group_to_row_indices)
+fig, ax = make_mds_plot(coords, group_to_row_indices, reverse_axes="x")
 
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig1_mds_plot", FIGSFOLDER)

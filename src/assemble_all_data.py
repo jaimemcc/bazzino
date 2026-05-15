@@ -38,6 +38,7 @@ import tdt
 import trompy as tp
 
 from scipy.spatial.distance import cdist
+from scipy.ndimage import uniform_filter1d
 from sklearn.decomposition import PCA
 from sklearn.cluster import SpectralClustering
 from sklearn.metrics import silhouette_score
@@ -160,6 +161,14 @@ PARAMS = {
     "behavior_transition_maxfev": 30000,
     "behavior_transition_require_negative_k": True,
     "behavior_transition_max_x0": 50,
+
+    # ── Behavioral transition method ──
+    # Selects how per-rat behavioral transition trials are determined:
+    #   - "sigmoid": fit a continuous sigmoid to the signal (existing default)
+    #   - "max_velocity": use the trial of maximum negative derivative (steepest decline)
+    "behavior_transition_method": "sigmoid",
+    # Smoothing window (must be odd) for the derivative when using "max_velocity".
+    "behavior_velocity_smoothing_window": 3,
 
     # ── Output ──
     "output_filename": "assembled_data.pickle",
@@ -994,6 +1003,82 @@ def find_behavioral_transitions(x_array, params, signal_col="simba_median_balanc
     return fits_df_behav
 
 
+def find_velocity_transitions(x_array, params, signal_col=None):
+    """Find per-rat behavioral transition using maximum negative velocity (derivative).
+
+    Computes the smoothed first derivative of *signal_col* for each rat in the
+    deplete + 45NaCl subset and returns the trial at which the most negative
+    velocity (steepest behavioural decline) occurs.
+
+    Parameters
+    ----------
+    x_array : pd.DataFrame
+        Full assembled trial-level DataFrame.
+    params : dict
+        Pipeline parameters.  Reads:
+          - ``behavior_transition_signal_col`` (default ``"simba_median_balance"``)
+          - ``behavior_velocity_smoothing_window`` (default ``3``, must be odd)
+          - ``transition_condition`` / ``transition_infusion`` for subsetting.
+    signal_col : str or None
+        Override the signal column; falls back to *params* if None.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``id``, ``x0_orig``, ``velocity_value``, ``n_trials``, ``success``.
+        Compatible with :func:`model_fit_helpers.build_realigned_trials`.
+    """
+    if signal_col is None:
+        signal_col = params.get("behavior_transition_signal_col", "simba_median_balance")
+    window_size = int(params.get("behavior_velocity_smoothing_window", 3))
+    if window_size % 2 == 0:
+        window_size += 1  # enforce odd for symmetric smoothing
+
+    cond = params["transition_condition"]
+    inf = params["transition_infusion"]
+    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
+
+    print(f"  Finding velocity-based transitions for {len(df_dep_45.id.unique())} rats")
+    print(f"  Signal: {signal_col}, smoothing window: {window_size}")
+
+    if signal_col not in df_dep_45.columns:
+        print(f"  Column '{signal_col}' not found; returning empty transitions.")
+        return pd.DataFrame(columns=["id", "x0_orig", "velocity_value", "n_trials", "success"])
+
+    results = []
+    for rat in df_dep_45.id.unique():
+        rat_data = df_dep_45.loc[df_dep_45.id == rat].copy().sort_values("trial")
+        signal = rat_data[signal_col].to_numpy(dtype=float)
+
+        if len(signal) < 2 or np.all(np.isnan(signal)):
+            results.append({
+                "id": rat, "x0_orig": np.nan, "velocity_value": np.nan,
+                "n_trials": len(signal), "success": False,
+            })
+            continue
+
+        derivative = np.diff(signal, prepend=signal[0])
+        smoothed = uniform_filter1d(derivative, size=window_size, mode="nearest")
+        max_vel_idx = int(np.argmin(smoothed))  # most negative velocity
+        max_vel = float(smoothed[max_vel_idx])
+        transition_trial = int(rat_data.iloc[max_vel_idx]["trial"])
+
+        results.append({
+            "id": rat,
+            "x0_orig": float(transition_trial),
+            "velocity_value": max_vel,
+            "n_trials": len(signal),
+            "success": True,
+        })
+
+    fits_df = pd.DataFrame(results)
+    success_count = int(fits_df["success"].sum()) if not fits_df.empty else 0
+    print(f"  Velocity transitions: {success_count}/{len(fits_df)} rats")
+    if not fits_df.empty:
+        print(f"  Transition trials: {fits_df.loc[fits_df['success'], 'x0_orig'].round(1).tolist()}")
+    return fits_df
+
+
 # ──────────────────────────────────────────────────────────────────────
 # STEP 7: Combine and realign
 # ──────────────────────────────────────────────────────────────────────
@@ -1357,23 +1442,43 @@ def run_pipeline(params=None):
         if cache_mode is None and "_cached_params" in cached:
             cache_mode = cached["_cached_params"].get("behavior_transition_mode")
 
-    if cached is not None and "fits_df" in cached and "fits_df_behav" in cached and cache_mode == params.get("behavior_transition_mode", "median_balance"):
+    # Cache is valid only when both the sigmoid mode AND transition method match.
+    cached_method = None
+    if cached is not None:
+        cached_method = cached.get("behavior_transition_method")
+        if cached_method is None and "_cached_params" in cached:
+            cached_method = cached["_cached_params"].get("behavior_transition_method")
+
+    current_method = params.get("behavior_transition_method", "sigmoid")
+    current_mode = params.get("behavior_transition_mode", "median_balance")
+    cache_valid = (
+        cached is not None
+        and "fits_df" in cached
+        and "fits_df_behav" in cached
+        and cache_mode == current_mode
+        and cached_method == current_method
+    )
+
+    if cache_valid:
         fits_df = cached["fits_df"]
         fits_df_da = cached.get("fits_df_da", fits_df)
         fits_df_behav = cached["fits_df_behav"]
         print(
             f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits "
-            f"(behavior_transition_mode={cache_mode})"
+            f"(method={current_method}, mode={cache_mode})"
         )
     else:
-        if cached is not None and cache_mode != params.get("behavior_transition_mode", "median_balance"):
+        if cached is not None:
             print(
-                f"  Transition cache mode mismatch (cached={cache_mode}, "
-                f"current={params.get('behavior_transition_mode', 'median_balance')}); recomputing transitions."
+                f"  Transition cache mismatch (cached method={cached_method}/{cache_mode}, "
+                f"current={current_method}/{current_mode}); recomputing transitions."
             )
         print(f"  Calculating transitions from deterministic clustering (random_state=0)")
         fits_df_da = find_sigmoidal_transitions(x_combined, params)
-        fits_df_behav = find_behavioral_transitions(x_combined, params)
+        if current_method == "max_velocity":
+            fits_df_behav = find_velocity_transitions(x_combined, params)
+        else:
+            fits_df_behav = find_behavioral_transitions(x_combined, params)
         fits_df = fits_df_da
         print(f"  Calculated {len(fits_df_da)} DA transition fits and {len(fits_df_behav)} behavioral transition fits")
         _save_cache(
@@ -1381,7 +1486,8 @@ def run_pipeline(params=None):
                 "fits_df": fits_df_da,
                 "fits_df_da": fits_df_da,
                 "fits_df_behav": fits_df_behav,
-                "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
+                "behavior_transition_mode": current_mode,
+                "behavior_transition_method": current_method,
                 "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
                 "behavior_transition_thresholds": (
                     params.get("behavior_transition_low_threshold", -0.7),
@@ -1415,6 +1521,8 @@ def run_pipeline(params=None):
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
         "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
         "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
+        "behavior_transition_method": params.get("behavior_transition_method", "sigmoid"),
+        "behavior_velocity_smoothing_window": params.get("behavior_velocity_smoothing_window", 3),
         "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
         "behavior_transition_low_threshold": params.get("behavior_transition_low_threshold", -0.7),
         "behavior_transition_high_threshold": params.get("behavior_transition_high_threshold", 0.7),
@@ -1479,6 +1587,7 @@ def run_pipeline(params=None):
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"  fits_df_da shape:  {fits_df_da.shape}")
     print(f"  fits_df_behav shape: {fits_df_behav.shape}")
+    print(f"  behavioral transition method: {metadata['behavior_transition_method']}")
     print(f"  behavioral transition mode: {metadata['behavior_transition_mode']}")
     print(f"\nData processing metadata:")
     print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
