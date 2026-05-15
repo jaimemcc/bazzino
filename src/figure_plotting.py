@@ -1038,7 +1038,8 @@ def sigmoid(x, L, x0, k, b):
     return _sigmoid_model(np.asarray(x, dtype=float), L, k, x0, b)
 
 def plot_auc_and_sigmoid(df, trial_column, data_column, ax=None, first_trial=0,
-                         include_steepness=True, color="#1f77b4", fit_to_raw_data=True):
+                         include_steepness=True, color="#1f77b4", fit_to_raw_data=True,
+                         do_not_plot_sigmoid=False):
     """Plot AUC data grouped by column with sigmoid fit."""
     if ax is None:
         f, ax = plt.subplots(figsize=(3, 3))
@@ -1052,6 +1053,10 @@ def plot_auc_and_sigmoid(df, trial_column, data_column, ax=None, first_trial=0,
             markerfacecolor="white", alpha=0.5)
     ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.1)
 
+    if do_not_plot_sigmoid:
+        print("Skipping sigmoid fit as requested")
+        return None
+    
     popt = fit_sigmoid(
         df,
         trial_column,
@@ -1119,13 +1124,15 @@ def make_realignment_panel_behav_and_da(data_for_figure, trial_col, da_column, s
     fig, ax = plt.subplots(figsize=(2.3, 2.1),
                      gridspec_kw={"left": 0.3, "right": 0.7, "top": 0.8, "bottom": 0.25},)
     
-    df = data_for_figure["df"]
+    
     
     if orig_ks:
+        df = data_for_figure["df_original"]
         da_k = data_for_figure['k_da_orig']
         behav_k = data_for_figure['k_behav_orig']
         xlabel = "Trial"
     else:
+        df = data_for_figure["df_realigned"]
         da_k = data_for_figure['k_da_realigned']
         behav_k = data_for_figure['k_behav_realigned']
         xlabel = "Trial (realigned)"
@@ -1157,13 +1164,14 @@ def make_realignment_panel_behav_and_da(data_for_figure, trial_col, da_column, s
 
 def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column_to_plot, parameter_key,
                            color="#1f77b4",
-                           da_label=True, behav_label=True):
+                           da_label=True, behav_label=True, do_not_plot_sigmoid=False):
     
     fig, ax = plt.subplots(figsize=(3.4, 2.1), ncols=2, sharey=True,
                      gridspec_kw={"left": 0.2, "right": 0.9, "top": 0.8, "bottom": 0.25,
                                   "wspace": 0.3},)
     
-    df = data_for_figure["df"]
+    df_orig = data_for_figure["df_original"]
+    df_realigned = data_for_figure["df_realigned"]
     
     if parameter_key == "behav":
         ylabel = 'App. behaviour'
@@ -1171,7 +1179,8 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
         ylabel = 'Dopamine AUC'
 
 
-    plot_auc_and_sigmoid(df, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color)
+    plot_auc_and_sigmoid(df_orig, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color,
+                         do_not_plot_sigmoid=do_not_plot_sigmoid)
     ax[0].set_xlabel("Trial", fontsize=10)
     ax[0].set_ylabel(ylabel, fontsize=10, color=color)
 
@@ -1180,7 +1189,8 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
             f"k = {data_for_figure[f"k_{parameter_key}_orig"]:.3f}",
             ha="center", transform=ax[0].transAxes)
     
-    plot_auc_and_sigmoid(df, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color)
+    plot_auc_and_sigmoid(df_realigned, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color,
+                         do_not_plot_sigmoid=do_not_plot_sigmoid)
     ax[1].set_xlabel("Trial (realigned)", fontsize=10)
     ax[1].set_xticks([-10, 0, 10, 20])
     
