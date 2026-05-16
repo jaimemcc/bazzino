@@ -83,7 +83,7 @@ data = get_snips(tank, showfigs=True)
 #     ax.plot(snip, color="black", alpha=0.1)
 
 # ax.plot(np.mean(data, axis=0), color="red")
-    
+
 
 # %%
 # also make accompanying df that contains details of the rat and the condition and the time in session

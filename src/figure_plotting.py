@@ -1047,7 +1047,8 @@ def sigmoid(x, L, x0, k, b):
     return _sigmoid_model(np.asarray(x, dtype=float), L, k, x0, b)
 
 def plot_auc_and_sigmoid(df, trial_column, data_column, ax=None, first_trial=0,
-                         include_steepness=True, color="#1f77b4", fit_to_raw_data=True,
+                         include_steepness=True, color="#1f77b4", markerfacecolor="white",
+                         fit_to_raw_data=True,
                          do_not_plot_sigmoid=False):
     """Plot AUC data grouped by column with sigmoid fit."""
     if ax is None:
@@ -1059,8 +1060,8 @@ def plot_auc_and_sigmoid(df, trial_column, data_column, ax=None, first_trial=0,
     x, y = (mean.index.values, mean.values)
 
     ax.plot(x, y, color=color, linestyle="", marker="o", markersize=5,
-            markerfacecolor="white", alpha=0.5)
-    ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.1)
+            markerfacecolor=markerfacecolor, alpha=0.7)
+    ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.2)
 
     if do_not_plot_sigmoid:
         print("Skipping sigmoid fit as requested")
@@ -1179,7 +1180,7 @@ def make_realignment_slope_panel(data_for_figure, column_to_plot, realignment_co
     slopes = {}
     for df, trial_col, alpha, linestyle, facecolor in zip([data_for_figure["df_orig_for_slope"], data_for_figure["df_reali_for_slope"]],
                              ["trial", realignment_column],
-                             [0.3, 0.8],
+                             [0.8, 0.8],
                              ["dashed", "solid"],
                              ["white", color]):
         
@@ -1230,11 +1231,9 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
                 ha="center", transform=ax[0].transAxes)
     
     plot_auc_and_sigmoid(df_realigned, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color,
-                         do_not_plot_sigmoid=do_not_plot_sigmoid)
+                         do_not_plot_sigmoid=do_not_plot_sigmoid, markerfacecolor=color)
     ax[1].set_xlabel("Trial (realigned)", fontsize=10)
     ax[1].set_xticks([-10, 0, 10, 20])
-    
-    ax[1].axvline(0, color='gray', linestyle='--', alpha=0.5, linewidth=1)
 
     ax[1].tick_params(axis='y')
     if not do_not_plot_sigmoid:
@@ -1246,6 +1245,39 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
         sns.despine(ax=axis, offset=5)
     
     return fig, ax
+
+def make_bootstrap_boxplot(box_data, color):
+
+    box_colors = ["grey", color]
+
+    f, ax = plt.subplots(figsize=(1.8, 2.1),
+                        gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.8, "bottom": 0.25},)
+    bp = ax.boxplot(
+        box_data,
+        positions=[0, 1],
+        widths=0.55,
+        showfliers=False,
+        patch_artist=True,
+    )
+
+    for patch, color in zip(bp["boxes"], box_colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
+        patch.set_edgecolor("black")
+
+    for key in ["medians", "whiskers", "caps"]:
+        for artist in bp[key]:
+            artist.set_color("black")
+
+    ax.set_xticks([])
+    ax.set_ylabel("Slope")
+    ax.set_xlabel("")
+
+    ax.axhline(0, color="gray", linestyle="--", alpha=0.5)
+
+    sns.despine(ax=ax, offset=5, bottom=True)
+
+    return f, ax
 
 def make_normalized_realignment_plot(data_for_figure, window_trials=np.arange(-5, 6),
                                      da_color="#1f77b4", behav_color="#2ca02c"):

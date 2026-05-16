@@ -233,7 +233,7 @@ data_to_save["x_array"] = x_array
 
 with open(DATAFOLDER / "bodypart_data.pickle", "wb") as f:
     dill.dump(data_to_save, f)
-    
+
 
 # %%
 ## pre-processing of the DLC angvel snips

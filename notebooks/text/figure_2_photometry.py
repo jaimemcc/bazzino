@@ -546,7 +546,7 @@ if SAVE_FIGS:
 f, ax = make_correlation_plot_da_1group(deplete_45_auc_epoch3, colors[3], fit="sigmoid", print_stats=False, ylim=ylim)
 if SAVE_FIGS:
     save_figure_atomic(f, "figS3_correlation_da_deplete45_epoch3", FIGSFOLDER)
-    
+
 
 # %% [markdown]
 # ## Organization

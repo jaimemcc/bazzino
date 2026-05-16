@@ -243,7 +243,7 @@ ax3.spines['right'].set_visible(True)
 ax3.set_yticks([0, 0.2, 0.4, 0.6])
 ax3.set_ylabel("Time moving per trial")
 f.savefig(FIGSFOLDER / "realigned_transitions_behav2.png")
-    
+
 
 # %%
 ## plot 5+/- trials around transition point, with sigmoidal fit and steepness of transition (k) in text box

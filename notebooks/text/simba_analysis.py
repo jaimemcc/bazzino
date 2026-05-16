@@ -136,7 +136,7 @@ for inf in ttls[stub].values:
     snips.append(prob_app[frame_on-50:frame_on+150].values)
 
 snips = np.array(snips[:-1])
-    
+
 
 # %%
 f, ax = plt.subplots(nrows=2, figsize=(10, 5), sharex=True)

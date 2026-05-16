@@ -208,7 +208,7 @@ cbar_ax.set_yticks([])
 if savefigs:
     # f.savefig(FIGSFOLDER / "clusters_heatmap_all.pdf", transparent=True)
     f.savefig(FIGSFOLDER / "clusters_heatmap_all.tif",  dpi=300, transparent=True)
-    
+
 
 # %%
 len(x_array)

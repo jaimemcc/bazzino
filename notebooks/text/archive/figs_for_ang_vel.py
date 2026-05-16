@@ -229,7 +229,7 @@ deplete_aucs = [get_auc(snips_10), get_auc(snips_45)]
 
 if savefigs:
     f.savefig(FIGSFOLDER / "snips_vel_deplete.pdf")
-    
+
 
 # %%
 f, ax = plt.subplots(figsize=(2.2, 2.2),

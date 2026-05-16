@@ -94,7 +94,7 @@ if resave_reduced_data:
 
     with open(DATAFOLDER / "snips_data_selected_conditions_reduced.pickle", "wb") as f:
         dill.dump(data_to_save, f)
-    
+
 
 # %%
 # for reduced (i.e. averaged snips/trials)
