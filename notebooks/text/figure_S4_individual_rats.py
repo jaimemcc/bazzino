@@ -30,9 +30,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
 import dill
-from scipy import stats
 from scipy.ndimage import gaussian_filter1d
-from scipy.spatial.distance import cdist
 from sklearn.manifold import MDS
 from trompy import save_figure_atomic
 from extract_behav_parameters import smooth_array
@@ -41,16 +39,11 @@ from extract_behav_parameters import smooth_array
 from figure_config import (
     configure_matplotlib, COLORS, HEATMAP_CMAP_DIV,
     HEATMAP_CMAP_RED, HEATMAP_CMAP_BLUE,
-    DATAFOLDER, RESULTSFOLDER, FIGSFOLDER,
-    HEATMAP_VLIM_BEHAV, YLIMS_BEHAV,
-    BEHAV_SMOOTH_WINDOW, SAVE_FIGS
+    DATAFOLDER, FIGSFOLDER,
+    SAVE_FIGS
 )
 from figure_plotting import (
-    smooth_array, get_heatmap_data_by_rat, get_mean_snips, get_auc,
-    init_heatmap_figure, init_snips_figure, make_heatmap,
-    plot_snips, plot_auc_summary, print_auc_stats, get_trial_data_by_rat,
-    scale_vlim_to_data, calculate_ylims,
-    draw_regression_line, make_correlation_plot_simba
+    smooth_array, scale_vlim_to_data,
 )
 
 # Configure matplotlib
@@ -112,7 +105,7 @@ def make_rep_rat_plot(snips_simba, snips_photo, x_array, rat):
     ax[0].set_yticks([])
     ax[0].set_xticks([])
 
-    ax[1].plot(np.mean(behav_data[:,50:150], axis=1), color=colors[3])
+    ax[1].plot(gaussian_filter1d(np.mean(behav_data[:,50:150], axis=1), sigma=5), color=colors[3])
     ax[1].set_xlabel("Trial")
     ax[1].set_ylabel("AUC")
     sns.despine(ax=ax[1], offset=5)
@@ -124,7 +117,7 @@ def make_rep_rat_plot(snips_simba, snips_photo, x_array, rat):
     hm.collections[0].set_rasterized(True)
 
 
-    ax[3].plot(np.mean(photo_data[:,50:150], axis=1), color=colors[3])
+    ax[3].plot(gaussian_filter1d(np.mean(photo_data[:,50:150], axis=1), sigma=5), color=colors[3])
 
 
 
@@ -142,10 +135,6 @@ def make_rep_rat_plot(snips_simba, snips_photo, x_array, rat):
         sns.despine(ax=axis, offset=5)
 
     return f
-
-
-# %%
-x_array.columns
 
 
 # %%
@@ -170,7 +159,7 @@ x_array.columns
 
 def norm_signal(y, smooth=True):
     if smooth:
-        y = gaussian_filter1d(y, sigma=1.2)
+        y = gaussian_filter1d(y, sigma=1)
     
     ymin, ymax = y.min(), y.max()
     
@@ -201,7 +190,7 @@ for idx, rat in enumerate(rats[:]):
 
     simba_median = x_array.query("id == @rat and condition == 'deplete'").simba_median_balance.values
     auc_da = x_array.query("id == @rat and condition == 'deplete'").auc_snips.values
-    da_norm = norm_signal(auc_da, smooth=False)
+    da_norm = norm_signal(auc_da, smooth=True)
     
     behav_transition = x_array.query("id == @rat and condition == 'deplete' and realigned_trials_behav == 0").trial.values[0]
     print(f"Rat {rat} transition trial: {behav_transition}")
@@ -219,9 +208,9 @@ for idx, rat in enumerate(rats[:]):
     ax[idx, 0].scatter(200, behav_transition, color="k", marker="<", s=50, zorder=5, clip_on=False)
 
 
-    ax[idx, 1].plot(simba_median, color=colors[3])
+    ax[idx, 1].plot(gaussian_filter1d(simba_median, sigma=1), color=colors[3])
     ax[idx, 1].set_ylim(-1.05, 1.05)
-    ax[idx, 1].axvline(behav_transition, color="k", linestyle="--", alpha=0.5)
+    ax[idx, 1].axvline(behav_transition, color="green", linestyle="--", alpha=0.5)
 
     hm = sns.heatmap(photo_data, ax=ax[idx, 3], cmap=custom_cmap,
                 vmin=vlim_photo[0], vmax=vlim_photo[1],

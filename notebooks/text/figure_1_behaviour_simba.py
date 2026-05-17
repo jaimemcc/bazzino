@@ -91,8 +91,6 @@ with open(assembled_data_path, "rb") as f:
 # Extract main components
 x_array = data["x_array"]
 snips_photo = data["snips_photo"]
-snips_movement = data["snips_movement"]
-snips_angvel = data["snips_angvel"]
 
 if SIMBA_METRIC == "zscore":
     snips_simba = data["snips_simba_zscore"]
@@ -115,12 +113,13 @@ print(f"Loaded assembled data from {assembled_data_path}")
 print(f"\nData structure:")
 print(f"  - x_array shape: {x_array.shape}")
 print(f"  - snips_photo shape: {snips_photo.shape}")
-print(f"  - snips_angvel shape: {snips_angvel.shape}")
-print(f"  - snips_movement shape: {snips_movement.shape}")
 print(f"  - snips_simba shape: {snips_simba.shape}")
 print(f"  - x_array columns: {x_array.columns.tolist()}")
 print(f"  - Number of trials: {len(x_array)}")
 
+
+# %%
+data.keys()
 
 # %% [markdown]
 # ## Figure 1: Behavioral Analysis — SIMBA Metrics
