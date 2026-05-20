@@ -49,6 +49,7 @@ from figure_config import (
 from figure_plotting import (
     smooth_array, get_heatmap_data_by_rat, get_mean_snips,
     calculate_ylims,
+)
 
 # Configure matplotlib
 configure_matplotlib()

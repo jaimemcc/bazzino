@@ -240,7 +240,7 @@ ax[9, 1].set_xlabel("Trials")
 ax[9, 4].set_xlabel("Trials")
 
 if SAVE_FIGS:
-    save_figure_atomic(f, "figS3_individual_rats", FIGSFOLDER)
+    save_figure_atomic(f, "figS4_individual_rats", FIGSFOLDER)
 
 
 
