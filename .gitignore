@@ -187,3 +187,6 @@ notebooks/**/*.ipynb
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Affinity Designer lock files
+*.afdesign~lock~
