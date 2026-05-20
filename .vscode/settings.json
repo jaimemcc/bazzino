@@ -1,5 +1,6 @@
 {
     "python-envs.defaultEnvManager": "renan-r-santos.pixi-code:pixi",
     "python-envs.defaultPackageManager": "renan-r-santos.pixi-code:pixi",
-    "isort.importStrategy": "useBundled"
+    "isort.importStrategy": "fromEnvironment",
+    "isort.serverEnabled": true
 }
