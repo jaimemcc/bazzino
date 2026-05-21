@@ -1199,7 +1199,7 @@ def make_realignment_slope_panel(data_for_figure, column_to_plot, realignment_co
         slopes[trial_col] = {"slope": slope, "intercept": intercept, "r": r, "p": p, "std_err": std_err}
         
     sns.despine(ax=ax, offset=5)
-    ax.set_xlabel("Trial (from midpoint)", fontsize=10)
+    ax.set_xlabel("Trial", fontsize=10)
         
     return fig, ax, slopes
 

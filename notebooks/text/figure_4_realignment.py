@@ -161,6 +161,7 @@ data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COL
 fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, SIMBA_COLUMN, "behav",
                                           color=BEHAV_COLOR, do_not_plot_sigmoid=True)
 
+ax[0].axvline(21, color="gray", linestyle="--", alpha=0.5)
 ax[1].axvline(0, color="gray", linestyle="--", alpha=0.5)
 
 save_figure_atomic(fig, "fig4_realignment_behaviour", FIGSFOLDER)
@@ -168,6 +169,7 @@ save_figure_atomic(fig, "fig4_realignment_behaviour", FIGSFOLDER)
 fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, DA_COLUMN, "da",
                                           color=DA_COLOR, do_not_plot_sigmoid=True)
 
+ax[0].axvline(18, color="gray", linestyle=":", alpha=0.5)
 ax[1].axvline(-3, color="gray", linestyle=":", alpha=0.5)
 save_figure_atomic(fig, "fig4_realignment_da", FIGSFOLDER)
 
@@ -186,8 +188,13 @@ save_figure_atomic(f, "fig4_realignment_slope_behav", FIGSFOLDER)
 
 
 print("Behaviour slopes")
-print("Orig. slope = {: .3f}".format(slopes["trial"]["slope"]))
+orig = slopes["trial"]
+print("Orig. slope = {: .3f}".format(orig["slope"]))
+print("Orig. p-value (H0: slope = 0) = {:.4g}".format(orig["p"]))
+print("Orig. significant vs 0:", "yes" if orig["p"] < 0.05 else "no")
 print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
+print("Reali. p-value (H0: slope = 0) = {:.4g}".format(slopes["realigned_trials_behav"]["p"]))
+print("Reali. significant vs 0:", "yes" if slopes["realigned_trials_behav"]["p"] < 0.05 else "no")
 
 subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
 data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN, offset=-3)
@@ -198,14 +205,20 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure, DA_COLUMN, REALIGNM
 
 # ax.set_yticks([-0.5, 0, 0.5, 1])
 ax.set_ylabel("Dopamine AUC")
-ax.set_xticks([-5, 0, 5], ["-8", "-3", "2"])
+# ax.set_xticks([-5, 0, 5], ["-8", "-3", "2"])
 ax.axvline(0, color="gray", linestyle=":", alpha=0.5)
 
 save_figure_atomic(f, "fig4_realignment_slope_da", FIGSFOLDER)
 
 print("Dopamine slopes")
 print("Orig. slope = {: .3f}".format(slopes["trial"]["slope"]))
+print("Orig. p-value (H0: slope = 0) = {:.4g}".format(slopes["trial"]["p"]))
+print("Orig. significant vs 0:", "yes" if slopes["trial"]["p"] < 0.05 else "no")
+
 print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
+print("Reali. p-value (H0: slope = 0) = {:.4g}".format(slopes["realigned_trials_behav"]["p"]))
+print("Reali. significant vs 0:", "yes" if slopes["realigned_trials_behav"]["p"] < 0.05 else "no")
+
 
 # %%
 from bootstrap_and_shuffle_helpers import get_bootstrapped_distribution, get_bootstrapped_distribution_using_slopes

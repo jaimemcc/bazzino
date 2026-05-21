@@ -74,12 +74,12 @@ PARAMS = {
     # ── Paths ──
     "data_folder": Path("data"),
     "results_folder": Path("results"),
-    # "tank_folder": Path("D:/TestData/bazzino/from_paula"),
-    "tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
+    "tank_folder": Path("D:/TestData/bazzino/from_paula"),
+    #"tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
     "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
     # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
-    # "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
-    "simba_folder": Path("C:/Users/jmc010/Data/bazzino/simba"), #laptop
+    "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
+    # "simba_folder": Path("C:/Users/jmc010/Data/bazzino/simba"), #laptop
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -180,8 +180,8 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": True,          # Skip Simba extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
+    "cache_simba": False,          # Skip Simba extraction, load from cache
+    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip transition fitting, load from cache
 
     # Cache filenames (in data_folder)
