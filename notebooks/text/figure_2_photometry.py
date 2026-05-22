@@ -462,7 +462,7 @@ f, ax = make_correlation_plot_da_1group(replete_10, colors[0], yaxis=True)
 if SAVE_FIGS:
     save_figure_atomic(f, "fig2_correlation_da_replete10", FIGSFOLDER)
 
-f, ax = make_correlation_plot_da_1group(replete_45, colors[1])
+f, ax = make_correlation_plot_da_1group(replete_45, colors[1], fit="sigmoid")
 if SAVE_FIGS:
     save_figure_atomic(f, "fig2_correlation_da_replete45", FIGSFOLDER)
 
@@ -485,9 +485,12 @@ fit_inputs = {
     "Deplete + 45NaCl": deplete_45,
 }
 
-fit_results, sigmoid_diagnostics_table = run_model_fit_comparison(fit_inputs)
+fit_results, sigmoid_diagnostics_table = run_model_fit_comparison(
+    fit_inputs,
+    models=("linear", "sigmoidal"),
+)
 
-print("Model fit results (AUC by trial) with quality checks:")
+print("Model fit results (AUC by trial; linear + sigmoidal only) with quality checks:")
 display(fit_results)
 
 # %%
@@ -495,7 +498,7 @@ display(fit_results)
 sigmoid_params_table = sigmoid_diagnostics_table[[
     "Condition", "L", "k", "x0", "b",
     "Sigmoid_valid", "Sigmoid_flags",
-    "x0_interior", "k_plausible", "ci_finite", "asymptotes_covered",
+    "x0_interior", "k_plausible", "amp_plausible", "ci_finite", "asymptotes_covered",
 ]].copy()
 
 print("Sigmoidal fit parameters (AUC by trial) with validity checks:")

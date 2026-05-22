@@ -504,7 +504,7 @@ f, ax = make_correlation_plot_simba_1group(replete_45, colors[1], simba_metric=S
 if SAVE_FIGS:
     save_figure_atomic(f, "fig1_correlation_simba_replete45", FIGSFOLDER)
     
-f, ax = make_correlation_plot_simba_1group(deplete_10, colors[2], fit="exponential", simba_metric=SIMBA_METRIC)
+f, ax = make_correlation_plot_simba_1group(deplete_10, colors[2], simba_metric=SIMBA_METRIC)
 if SAVE_FIGS:
     save_figure_atomic(f, "fig1_correlation_simba_deplete10", FIGSFOLDER)
     
@@ -523,9 +523,12 @@ fit_inputs = {
     "Deplete + 45NaCl": deplete_45,
 }
 
-fit_results, sigmoid_params_table = run_model_fit_comparison(fit_inputs)
+fit_results, sigmoid_params_table = run_model_fit_comparison(
+    fit_inputs,
+    models=("linear", "sigmoidal"),
+)
 
-print("Model fit results (AUC_simba by trial) with quality checks:")
+print("Model fit results (AUC_simba by trial; linear + sigmoidal only) with quality checks:")
 display(fit_results)
 
 print("Sigmoidal fit parameters (AUC_simba by trial) with validity checks:")

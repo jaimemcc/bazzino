@@ -179,7 +179,7 @@ def fit_curve_series(x, y, model_name="sigmoidal", p0=None, bounds=None, maxfev=
         }
 
 
-def _sigmoid_quality_checks(x, params, pcov):
+def _sigmoid_quality_checks(x, params, pcov, y=None, k_abs_min=0.02, k_abs_max=10.0, min_amp_frac=0.15):
     if params is None or len(params) != 4 or np.any(~np.isfinite(params)):
         return False, "fit_failed", {"x0_interior": False, "k_plausible": False, "ci_finite": False, "asymptotes_covered": False}
 
@@ -188,8 +188,15 @@ def _sigmoid_quality_checks(x, params, pcov):
     x_range = max(x_max - x_min, 1.0)
     edge_margin = 0.15 * x_range
     x0_interior = (x_min + edge_margin) <= x0 <= (x_max - edge_margin)
-    # Keep a minimum steepness floor but allow very steep transitions.
-    k_plausible = np.isfinite(k) and (0.02 <= abs(k))
+    # Require non-trivial steepness but reject near-step transitions.
+    k_plausible = np.isfinite(k) and (k_abs_min <= abs(k) <= k_abs_max)
+
+    amp_plausible = True
+    if y is not None:
+        y = np.asarray(y, dtype=float)
+        if np.any(np.isfinite(y)):
+            y_range = max(float(np.nanmax(y) - np.nanmin(y)), 1e-9)
+            amp_plausible = abs(L) >= (min_amp_frac * y_range)
 
     ci_finite = False
     if pcov is not None:
@@ -220,6 +227,7 @@ def _sigmoid_quality_checks(x, params, pcov):
     checks = {
         "x0_interior": bool(x0_interior),
         "k_plausible": bool(k_plausible),
+        "amp_plausible": bool(amp_plausible),
         "ci_finite": bool(ci_finite),
         "asymptotes_covered": bool(asymptotes_covered),
     }
@@ -856,8 +864,8 @@ def build_realigned_trials(df, fits_df, output_col, id_col="id", trial_col="tria
     return pd.Series(aligned, index=df.index, name=output_col, dtype=float)
 
 
-def run_model_fit_comparison(fit_inputs, round_digits=4):
-    """Fit linear/exponential/sigmoidal models for each condition.
+def run_model_fit_comparison(fit_inputs, round_digits=4, models=("linear", "exponential", "sigmoidal")):
+    """Fit selected model families for each condition.
 
     Parameters
     ----------
@@ -865,12 +873,23 @@ def run_model_fit_comparison(fit_inputs, round_digits=4):
         Mapping of condition label to 1D response array ordered by trial.
     round_digits : int
         Number of decimals to report in result tables.
+    models : tuple[str, ...]
+        Model families to include. Allowed values are
+        ``("linear", "exponential", "sigmoidal")``.
 
     Returns
     -------
     tuple[pd.DataFrame, pd.DataFrame]
         fit_results table and sigmoid_diagnostics table.
     """
+    allowed_models = {"linear", "exponential", "sigmoidal"}
+    models = tuple(models)
+    unknown = [m for m in models if m not in allowed_models]
+    if unknown:
+        raise ValueError(f"Unknown model(s): {unknown}. Allowed: {sorted(allowed_models)}")
+    if len(models) == 0:
+        raise ValueError("models must contain at least one model name")
+
     rows = []
     sigmoid_diagnostics = []
 
@@ -878,60 +897,69 @@ def run_model_fit_comparison(fit_inputs, round_digits=4):
         y = np.asarray(y, dtype=float)
         x = np.arange(1, len(y) + 1, dtype=float)
 
-        lin = _fit_linear(x, y)
-        rows.append({
-            "Condition": condition_label,
-            "Model": "Linear",
-            "r": lin["r"],
-            "p": lin["p"],
-            "RMSE": lin["rmse"],
-            "AICc": lin["aicc"],
-            "BIC": lin["bic"],
-            "Sigmoid_valid": np.nan,
-            "Sigmoid_flags": "",
-        })
+        if "linear" in models:
+            lin = _fit_linear(x, y)
+            rows.append({
+                "Condition": condition_label,
+                "Model": "Linear",
+                "r": lin["r"],
+                "p": lin["p"],
+                "RMSE": lin["rmse"],
+                "AICc": lin["aicc"],
+                "BIC": lin["bic"],
+                "Sigmoid_valid": np.nan,
+                "Sigmoid_flags": "",
+            })
 
-        exp_fit = _fit_curve("exponential", _exp_model, x, y)
-        rows.append({
-            "Condition": condition_label,
-            "Model": "Exponential",
-            "r": exp_fit["r"],
-            "p": exp_fit["p"],
-            "RMSE": exp_fit["rmse"],
-            "AICc": exp_fit["aicc"],
-            "BIC": exp_fit["bic"],
-            "Sigmoid_valid": np.nan,
-            "Sigmoid_flags": "",
-        })
+        if "exponential" in models:
+            exp_fit = _fit_curve("exponential", _exp_model, x, y)
+            rows.append({
+                "Condition": condition_label,
+                "Model": "Exponential",
+                "r": exp_fit["r"],
+                "p": exp_fit["p"],
+                "RMSE": exp_fit["rmse"],
+                "AICc": exp_fit["aicc"],
+                "BIC": exp_fit["bic"],
+                "Sigmoid_valid": np.nan,
+                "Sigmoid_flags": "",
+            })
 
-        sig_fit = _fit_curve("sigmoidal", _sigmoid_model, x, y)
-        is_valid, reasons, checks = _sigmoid_quality_checks(x, sig_fit["params"], sig_fit["pcov"])
-        rows.append({
-            "Condition": condition_label,
-            "Model": "Sigmoidal",
-            "r": sig_fit["r"],
-            "p": sig_fit["p"],
-            "RMSE": sig_fit["rmse"],
-            "AICc": sig_fit["aicc"],
-            "BIC": sig_fit["bic"],
-            "Sigmoid_valid": is_valid,
-            "Sigmoid_flags": reasons,
-        })
+        if "sigmoidal" in models:
+            sig_fit = _fit_curve("sigmoidal", _sigmoid_model, x, y)
+            is_valid, reasons, checks = _sigmoid_quality_checks(
+                x,
+                sig_fit["params"],
+                sig_fit["pcov"],
+                y=y,
+            )
+            rows.append({
+                "Condition": condition_label,
+                "Model": "Sigmoidal",
+                "r": sig_fit["r"],
+                "p": sig_fit["p"],
+                "RMSE": sig_fit["rmse"],
+                "AICc": sig_fit["aicc"],
+                "BIC": sig_fit["bic"],
+                "Sigmoid_valid": is_valid,
+                "Sigmoid_flags": reasons,
+            })
 
-        L, k, x0, b = sig_fit["params"] if len(sig_fit["params"]) == 4 else [np.nan, np.nan, np.nan, np.nan]
-        sigmoid_diagnostics.append({
-            "Condition": condition_label,
-            "L": L,
-            "k": k,
-            "x0": x0,
-            "b": b,
-            "Sigmoid_valid": is_valid,
-            "Sigmoid_flags": reasons,
-            "x0_interior": checks["x0_interior"],
-            "k_plausible": checks["k_plausible"],
-            "ci_finite": checks["ci_finite"],
-            "asymptotes_covered": checks["asymptotes_covered"],
-        })
+            L, k, x0, b = sig_fit["params"] if len(sig_fit["params"]) == 4 else [np.nan, np.nan, np.nan, np.nan]
+            sigmoid_diagnostics.append({
+                "Condition": condition_label,
+                "L": L,
+                "k": k,
+                "x0": x0,
+                "b": b,
+                "Sigmoid_valid": is_valid,
+                "Sigmoid_flags": reasons,
+                "x0_interior": checks["x0_interior"],
+                "k_plausible": checks["k_plausible"],
+                "amp_plausible": checks["amp_plausible"],
+                "ci_finite": checks["ci_finite"],
+                "asymptotes_covered": checks["asymptotes_covered"],
+            })
 
     fit_results = pd.DataFrame(rows)
     fit_results["AICc_rank"] = fit_results.groupby("Condition")["AICc"].rank(method="dense")
@@ -956,7 +984,7 @@ def summarize_best_valid_model(fit_results, round_digits=4):
     - (sigmoidal only) passes sigmoid quality checks
     """
     p_threshold = 0.05
-    min_delta_aicc = 2.0
+    min_delta_aicc = 4.0
     summary_rows = []
 
     for condition_label, group in fit_results.groupby("Condition"):
