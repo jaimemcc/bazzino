@@ -349,6 +349,115 @@ else:
         display(mixed_res.summary().tables[1])
 
 # %%
+# 1E mixed ANOVA: condition (within) × infusiontype × sex (between)
+# 3-way interaction (condition × infusiontype × sex) excluded — sex is included
+# as a main effect and in 2-way interactions but the 3-way is pooled into error.
+#
+# Implemented via OLS decomposition (mathematically equivalent to standard mixed ANOVA):
+#   Between-subjects effects  →  OLS on per-subject means (collapsed over condition)
+#   Within-subjects effects   →  OLS on condition contrast (deplete − replete)
+
+import statsmodels.formula.api as smf
+from statsmodels.stats.anova import anova_lm
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+# Pivot to wide format: one row per subject
+wide_df = model_df.pivot_table(
+    index=["id", "infusiontype", "sex"],
+    columns="condition",
+    values="auc",
+).reset_index()
+wide_df.columns.name = None
+n_s = len(wide_df)
+
+# Between-subjects partition: OLS on per-subject means
+# Full factorial between factors (infusiontype × sex interaction retained)
+wide_df["subj_mean"] = wide_df[["replete", "deplete"]].mean(axis=1)
+bw_fit = smf.ols("subj_mean ~ C(infusiontype) * C(sex)", data=wide_df).fit()
+
+# Within-subjects partition: OLS on condition contrast (deplete − replete)
+# No 3-way: use additive model for within × between interactions
+wide_df["cond_diff"] = wide_df["deplete"] - wide_df["replete"]
+wi_fit = smf.ols("cond_diff ~ C(infusiontype) + C(sex)", data=wide_df).fit()
+
+# Condition main effect F (computed manually from the within-subjects error)
+mean_d = wide_df["cond_diff"].mean()
+F_C = n_s * mean_d ** 2 / wi_fit.mse_resid
+p_C = stats.f.sf(F_C, dfn=1, dfd=wi_fit.df_resid)
+
+def _label(s):
+    return (s.replace("C(infusiontype)", "infusiontype")
+             .replace("C(sex)", "sex")
+             .replace(":", " × "))
+
+rows = []
+for src, row in anova_lm(bw_fit, typ=2).iterrows():
+    if src == "Residual":
+        rows.append({"Source": "  Error (between-subjects)", "df": int(row["df"]),
+                     "F": np.nan, "p": np.nan})
+    else:
+        rows.append({"Source": _label(src), "df": int(row["df"]),
+                     "F": row["F"], "p": row["PR(>F)"]})
+
+rows.append({"Source": "condition", "df": 1, "F": F_C, "p": p_C})
+
+for src, row in anova_lm(wi_fit, typ=2).iterrows():
+    if src == "Residual":
+        rows.append({"Source": "  Error (within-subjects)", "df": int(row["df"]),
+                     "F": np.nan, "p": np.nan})
+    else:
+        rows.append({"Source": "condition × " + _label(src), "df": int(row["df"]),
+                     "F": row["F"], "p": row["PR(>F)"]})
+
+aov_table = pd.DataFrame(rows).set_index("Source")
+
+print("Mixed ANOVA  (condition: within | infusiontype, sex: between; 3-way interaction excluded)")
+print(f"N = {n_s} subjects | Between-error df = {int(bw_fit.df_resid)} | "
+      f"Within-error df = {int(wi_fit.df_resid)}\n")
+display(aov_table.round(4))
+
+
+# %%
+# Export JASP-ready data for mixed ANOVA
+# Saves both wide (recommended for repeated-measures setup in JASP) and long formats.
+
+jasp_outdir = RESULTSFOLDER
+jasp_outdir.mkdir(parents=True, exist_ok=True)
+
+# Wide format: one row per subject, between factors as columns,
+# repeated-measures levels as separate dependent-variable columns.
+jasp_wide = (
+    model_df
+    .pivot_table(index=["id", "infusiontype", "sex"], columns="condition", values="auc")
+    .reset_index()
+)
+jasp_wide.columns.name = None
+jasp_wide = jasp_wide.rename(columns={
+    "replete": "auc_replete",
+    "deplete": "auc_deplete",
+})
+
+# Long format: one row per subject x condition
+jasp_long = model_df[["id", "infusiontype", "sex", "condition", "auc"]].copy()
+
+wide_path = jasp_outdir / "figure1_mixed_anova_jasp_wide.csv"
+long_path = jasp_outdir / "figure1_mixed_anova_jasp_long.csv"
+
+jasp_wide.to_csv(wide_path, index=False)
+jasp_long.to_csv(long_path, index=False)
+
+print("Saved JASP export files:")
+print(f"  - {wide_path}")
+print(f"  - {long_path}")
+print("\nWide format columns:", list(jasp_wide.columns))
+print("Long format columns:", list(jasp_long.columns))
+
+display(jasp_wide.head())
+
+
+# %%
 # 1E posthoc pairwise tests across 4 groups (ignoring sex) with multiple-comparison correction
 posthoc_results, groups = posthoc_pairwise_auc(x_array, value_col=simba_col)
 

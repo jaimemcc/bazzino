@@ -326,6 +326,108 @@ dopamine_p_matrix = holm_matrix_from_posthoc(dopamine_posthoc_results, dopamine_
 print("\nFigure 2E compact matrix: Holm-adjusted p-values")
 display(dopamine_p_matrix)
 
+# %%
+# 2E mixed ANOVA: condition (within) x infusiontype x sex (between)
+# 3-way interaction excluded; sex main effect and relevant 2-way interactions retained.
+
+import statsmodels.formula.api as smf
+from statsmodels.stats.anova import anova_lm
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+# Rebuild dopamine_model_df if needed (same display scaling as omnibus cell)
+if "dopamine_model_df" not in globals():
+    auc_display_scale = globals().get("AUC_DISPLAY_SCALE", 10.0)
+    x_array_display = x_array.assign(auc_snips=x_array["auc_snips"] / auc_display_scale)
+    dopamine_model_df = prepare_mixedlm_auc_df(x_array_display)
+
+wide_df = dopamine_model_df.pivot_table(
+    index=["id", "infusiontype", "sex"],
+    columns="condition",
+    values="auc",
+).reset_index()
+wide_df.columns.name = None
+n_s = len(wide_df)
+
+# Between-subjects model: infusiontype + sex + infusiontype:sex
+wide_df["subj_mean"] = wide_df[["replete", "deplete"]].mean(axis=1)
+bw_fit = smf.ols("subj_mean ~ C(infusiontype) * C(sex)", data=wide_df).fit()
+
+# Within-subjects contrast model: condition effects and 2-way interactions only
+wide_df["cond_diff"] = wide_df["deplete"] - wide_df["replete"]
+wi_fit = smf.ols("cond_diff ~ C(infusiontype) + C(sex)", data=wide_df).fit()
+
+mean_d = wide_df["cond_diff"].mean()
+F_C = n_s * mean_d ** 2 / wi_fit.mse_resid
+p_C = stats.f.sf(F_C, dfn=1, dfd=wi_fit.df_resid)
+
+def _label(s):
+    return (s.replace("C(infusiontype)", "infusiontype")
+             .replace("C(sex)", "sex")
+             .replace(":", " x "))
+
+rows = []
+for src, row in anova_lm(bw_fit, typ=2).iterrows():
+    if src == "Residual":
+        rows.append({"Source": "Error (between-subjects)", "df": int(row["df"]), "F": np.nan, "p": np.nan})
+    else:
+        rows.append({"Source": _label(src), "df": int(row["df"]), "F": row["F"], "p": row["PR(>F)"]})
+
+rows.append({"Source": "condition", "df": 1, "F": F_C, "p": p_C})
+
+for src, row in anova_lm(wi_fit, typ=2).iterrows():
+    if src == "Residual":
+        rows.append({"Source": "Error (within-subjects)", "df": int(row["df"]), "F": np.nan, "p": np.nan})
+    else:
+        rows.append({"Source": "condition x " + _label(src), "df": int(row["df"]), "F": row["F"], "p": row["PR(>F)"]})
+
+dopamine_aov_table = pd.DataFrame(rows).set_index("Source")
+
+print("Figure 2E mixed ANOVA (condition: within | infusiontype, sex: between; 3-way excluded)")
+print(f"N = {n_s} subjects | Between-error df = {int(bw_fit.df_resid)} | Within-error df = {int(wi_fit.df_resid)}")
+display(dopamine_aov_table.round(4))
+
+# %%
+# Export JASP-ready data for Figure 2 mixed ANOVA
+# Saves both wide and long formats.
+
+# Rebuild dopamine_model_df if needed (same display scaling as omnibus cell)
+if "dopamine_model_df" not in globals():
+    auc_display_scale = globals().get("AUC_DISPLAY_SCALE", 10.0)
+    x_array_display = x_array.assign(auc_snips=x_array["auc_snips"] / auc_display_scale)
+    dopamine_model_df = prepare_mixedlm_auc_df(x_array_display)
+
+jasp_outdir = RESULTSFOLDER
+jasp_outdir.mkdir(parents=True, exist_ok=True)
+
+jasp_wide = (
+    dopamine_model_df
+    .pivot_table(index=["id", "infusiontype", "sex"], columns="condition", values="auc")
+    .reset_index()
+)
+jasp_wide.columns.name = None
+jasp_wide = jasp_wide.rename(columns={
+    "replete": "auc_replete",
+    "deplete": "auc_deplete",
+})
+
+jasp_long = dopamine_model_df[["id", "infusiontype", "sex", "condition", "auc"]].copy()
+
+wide_path = jasp_outdir / "figure2_mixed_anova_jasp_wide.csv"
+long_path = jasp_outdir / "figure2_mixed_anova_jasp_long.csv"
+
+jasp_wide.to_csv(wide_path, index=False)
+jasp_long.to_csv(long_path, index=False)
+
+print("Saved JASP export files:")
+print(f"  - {wide_path}")
+print(f"  - {long_path}")
+print("\nWide format columns:", list(jasp_wide.columns))
+print("Long format columns:", list(jasp_long.columns))
+
+display(jasp_wide.head())
+
 
 # %% [markdown]
 # ### Correlation plots
