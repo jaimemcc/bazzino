@@ -209,7 +209,8 @@ ax[0].set_ylabel("Dopamine (AUC)")
 def make_trial_and_nacl_plot(x_vals_100, deplete_10, x_vals_450, deplete_45, colors=colors):
     
     f, ax = plt.subplots(ncols=3, figsize=(6, 1.8), sharey=True,
-                         gridspec_kw={"wspace": 0.5, "width_ratios": [0.5, 0.5, 1.2]})
+                         gridspec_kw={"wspace": 0.5, "width_ratios": [0.5, 0.5, 1.2],
+                                      "bottom": 0.3})
     
     x_vals_trial = np.arange(0,49)
     ax[0].scatter(x_vals_trial, deplete_10, color=colors[2], label="10 mM NaCl", alpha=0.3)
