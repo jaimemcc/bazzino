@@ -629,14 +629,29 @@ print(results["report_text"])
 # keep_triangle options: "upper" or "lower"
 fig, ax, fig_cbar, ax_cbar = make_confusion_matrix(
     cm,
-    remove_redundant_labels=True,
-    keep_triangle="upper",
 )
 save_figure_atomic(fig, "fig1_confusion_matrix", FIGSFOLDER)
 
 ax_cbar.set_yticks([])
 save_figure_atomic(fig_cbar, "fig1_confusion_matrix_cbar", FIGSFOLDER)
 
+
+# %%
+# Binomial test: classifier accuracy vs chance level
+from scipy.stats import binomtest
+
+n_total = len(y)
+n_classes = len(np.unique(y))
+chance_level = 1.0 / n_classes
+n_correct = int(round(results["accuracy"] * n_total))
+
+binom_res = binomtest(k=n_correct, n=n_total, p=chance_level, alternative="greater")
+
+print(f"n_total = {n_total}")
+print(f"n_correct = {n_correct}")
+print(f"accuracy = {results['accuracy']:.3f}")
+print(f"chance level = {chance_level:.3f}")
+print(f"one-sided binomial p-value = {binom_res.pvalue:.12g}")
 
 # %%
 ### Figure 1 legend swatches (pie-style legend exports)

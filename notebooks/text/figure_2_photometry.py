@@ -40,7 +40,8 @@ from trompy import save_figure_atomic
 
 from distance_matrix import (make_metric_matrix, get_group_matrix_diffs,
                              GROUP_ORDER, GROUP_LABELS,
-                             compute_mds_coordinates
+                             compute_mds_coordinates,
+                             classify_groups_from_metric
 )
 
 from figure_config import (
@@ -55,7 +56,8 @@ from figure_plotting import (
     plot_snips, plot_auc_summary, print_auc_stats,
     scale_vlim_to_data, calculate_ylims, make_correlation_plot_da,
     make_correlation_plot_da_1group, make_mds_plot,
-    make_euclidean_distance_heatmap_all_rats, make_euclidean_distance_heatmap_averaged
+    make_euclidean_distance_heatmap_all_rats, make_euclidean_distance_heatmap_averaged,
+    make_confusion_matrix
 )
 
 # Configure matplotlib
@@ -537,7 +539,27 @@ fig, ax = make_euclidean_distance_heatmap_all_rats(distances, group_boundaries=g
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig2_heatmap_euclidean_all_rats", FIGSFOLDER)
     
-fig, ax, fig_cbar, ax_cbar = make_euclidean_distance_heatmap_averaged(group_distance_matrix)
+fig, ax, fig_cbar, ax_cbar = make_euclidean_distance_heatmap_averaged(group_distance_matrix,
+                                                                          remove_redundant_labels=True,
+    keep_triangle="upper",)
+
+# Notebook-specific display scaling: show annotation labels divided by 10
+for txt in ax.texts:
+    s = txt.get_text().strip()
+    if s == "":
+        continue
+    try:
+        val = float(s)
+    except ValueError:
+        continue
+    scaled = val / 10.0
+    s_scaled = f"{scaled:.1f}"
+    if s_scaled.startswith("-0"):
+        s_scaled = "-" + s_scaled[2:]
+    elif s_scaled.startswith("0"):
+        s_scaled = s_scaled[1:]
+    txt.set_text(s_scaled)
+
 ax_cbar.set_ylim([60, 100])
 ax_cbar.set_yticks([60, 80, 100], labels=["6", "8", "10"])
 
@@ -553,6 +575,60 @@ fig, ax = make_mds_plot(coords, group_to_row_indices, reverse_axes="y")
 
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig2_mds_plot", FIGSFOLDER)
+
+# %%
+# make confusion matrix
+metric_col = "auc_snips"
+results = classify_groups_from_metric(
+    x_array=x_array,
+    metric_col=metric_col,
+    group_order=GROUP_ORDER,
+    group_labels=GROUP_LABELS,
+    smooth_features=False,
+    expected_n_trials=49,
+    normalize="true",
+)
+
+X = results["X"]
+y = results["y"]
+rat_groups = results["rat_groups"]
+metric_matrix_df = results["metric_matrix_df"]
+cm = results["cm"]
+
+print("Feature matrix shape (n_samples, n_trials):", X.shape)
+print("Unique class labels:", np.unique(y))
+print("Unique rats:", len(np.unique(rat_groups)))
+print(f"Leave-One-Rat-Out CV accuracy: {results['accuracy']:.3f}")
+print(results["report_text"])
+
+# Toggle redundant annotation labels on/off for symmetric matrix plots.
+# keep_triangle options: "upper" or "lower"
+fig, ax, fig_cbar, ax_cbar = make_confusion_matrix(
+    cm,
+)
+
+save_figure_atomic(fig, "fig2_confusion_matrix", FIGSFOLDER)
+
+ax_cbar.set_yticks([])
+save_figure_atomic(fig_cbar, "fig2_confusion_matrix_cbar", FIGSFOLDER)
+
+
+# %%
+# Binomial test: classifier accuracy vs chance level
+from scipy.stats import binomtest
+
+n_total = len(y)
+n_classes = len(np.unique(y))
+chance_level = 1.0 / n_classes
+n_correct = int(round(results["accuracy"] * n_total))
+
+binom_res = binomtest(k=n_correct, n=n_total, p=chance_level, alternative="greater")
+
+print(f"n_total = {n_total}")
+print(f"n_correct = {n_correct}")
+print(f"accuracy = {results['accuracy']:.3f}")
+print(f"chance level = {chance_level:.3f}")
+print(f"one-sided binomial p-value = {binom_res.pvalue:.12g}")
 
 # %% [markdown]
 # ### Supplemental fig with different epochs (S3?)
