@@ -30,6 +30,7 @@ import seaborn as sns
 import dill
 
 from scipy.stats import linregress
+import pingouin as pg
 
 from matplotlib.colors import to_hex
 
@@ -109,7 +110,14 @@ def make_auc_and_sem_data_per_trial(x_array, condition, infusiontype, y_col):
 
     return auc_data, sem_data
 
-deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
+# deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
+
+# get xvals for diff infusion volumes
+scaling_factor_100mM = 2.3376
+scaling_factor_450mM = 2.3376 * 4.5
+
+x_vals_100 = np.arange(0,49)*scaling_factor_100mM
+x_vals_450 = np.arange(0,49)*scaling_factor_450mM
 
 
 # %%
@@ -193,6 +201,9 @@ save_figure_atomic(f, "fig5_nacl_da", FIGSFOLDER)
 # so anova with trial and condition as factors, then do regression of behavior vs da per trial
 
 
+
+# %%
+## ignore below this cell!
 
 # %%
 import numpy as np
