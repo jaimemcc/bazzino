@@ -76,7 +76,8 @@ from figure_plotting import (
     scale_vlim_to_data, calculate_ylims,
     draw_regression_line, make_correlation_plot_simba,
     make_correlation_plot_simba_1group, make_mds_plot,
-    make_euclidean_distance_heatmap_all_rats, make_euclidean_distance_heatmap_averaged
+    make_euclidean_distance_heatmap_all_rats, make_euclidean_distance_heatmap_averaged,
+    make_confusion_matrix
 )
 
 # Configure matplotlib
@@ -616,6 +617,7 @@ X = results["X"]
 y = results["y"]
 rat_groups = results["rat_groups"]
 metric_matrix_df = results["metric_matrix_df"]
+cm = results["cm"]
 
 print("Feature matrix shape (n_samples, n_trials):", X.shape)
 print("Unique class labels:", np.unique(y))
