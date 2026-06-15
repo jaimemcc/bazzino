@@ -391,6 +391,171 @@ print(f"  Std: {cross_corr_deplete_45NaCl['lag_trials'].std():.2f} trials")
 print(f"\nMean Pearson correlation at optimal lag: {cross_corr_deplete_45NaCl['pearson_r'].mean():.3f}")
 
 # %%
+# Stats: compare optimal lags to zero for all groups and between groups
+from itertools import combinations
+from scipy.stats import f_oneway, ttest_1samp, ttest_ind, wilcoxon
+
+# Ensure all groups are available in case this cell is run independently.
+if "cross_corr_deplete_45NaCl" not in globals():
+    cross_corr_deplete_45NaCl = get_lags_all_animals(
+        x_array, lag_range=lag_range, condition="deplete", infusiontype="45NaCl", direction=direction
+    )
+if "cross_corr_deplete_10NaCl" not in globals():
+    cross_corr_deplete_10NaCl = get_lags_all_animals(
+        x_array, lag_range=lag_range, condition="deplete", infusiontype="10NaCl", direction=direction
+    )
+if "cross_corr_replete_45NaCl" not in globals():
+    cross_corr_replete_45NaCl = get_lags_all_animals(
+        x_array, lag_range=lag_range, condition="replete", infusiontype="45NaCl", direction=direction
+    )
+if "cross_corr_replete_10NaCl" not in globals():
+    cross_corr_replete_10NaCl = get_lags_all_animals(
+        x_array, lag_range=lag_range, condition="replete", infusiontype="10NaCl", direction=direction
+    )
+
+group_lag_data = {
+    "replete_10NaCl": cross_corr_replete_10NaCl,
+    "replete_45NaCl": cross_corr_replete_45NaCl,
+    "deplete_10NaCl": cross_corr_deplete_10NaCl,
+    "deplete_45NaCl": cross_corr_deplete_45NaCl,
+}
+
+# --- One-sample tests: each group against zero lag ---
+rows = []
+for group_name, group_df in group_lag_data.items():
+    lags = group_df["lag_trials"].dropna().to_numpy(dtype=float)
+    n = len(lags)
+
+    t_stat, t_p = (np.nan, np.nan)
+    w_stat, w_p = (np.nan, np.nan)
+
+    if n >= 2:
+        t_stat, t_p = ttest_1samp(lags, popmean=0.0, alternative="two-sided")
+
+        # If all lags are exactly zero, Wilcoxon is undefined after dropping zero diffs.
+        if np.allclose(lags, 0):
+            w_stat, w_p = (0.0, 1.0)
+        else:
+            try:
+                w_stat, w_p = wilcoxon(lags, zero_method="wilcox", alternative="two-sided", mode="auto")
+            except ValueError:
+                w_stat, w_p = (np.nan, np.nan)
+
+    rows.append({
+        "group": group_name,
+        "n_animals": n,
+        "mean_lag": np.mean(lags) if n else np.nan,
+        "median_lag": np.median(lags) if n else np.nan,
+        "t_stat": t_stat,
+        "t_p": t_p,
+        "wilcoxon_stat": w_stat,
+        "wilcoxon_p": w_p,
+    })
+
+lag_vs_zero_stats = pd.DataFrame(rows)
+
+# Bonferroni correction across 4 groups for each test family.
+lag_vs_zero_stats["t_p_bonf"] = np.minimum(lag_vs_zero_stats["t_p"] * len(lag_vs_zero_stats), 1.0)
+lag_vs_zero_stats["wilcoxon_p_bonf"] = np.minimum(
+    lag_vs_zero_stats["wilcoxon_p"] * len(lag_vs_zero_stats), 1.0
+)
+
+print("Optimal lag vs zero (two-sided one-sample tests)")
+display(
+    lag_vs_zero_stats[[
+        "group",
+        "n_animals",
+        "mean_lag",
+        "median_lag",
+        "t_stat",
+        "t_p",
+        "t_p_bonf",
+        "wilcoxon_stat",
+        "wilcoxon_p",
+        "wilcoxon_p_bonf",
+    ]].round(4)
+)
+
+# --- Between-group test: one-way ANOVA ---
+lag_group_rows = []
+for group_name, group_df in group_lag_data.items():
+    for lag in group_df["lag_trials"].dropna().to_numpy(dtype=float):
+        lag_group_rows.append({"group": group_name, "lag_trials": lag})
+
+lag_group_df = pd.DataFrame(lag_group_rows)
+group_order = list(group_lag_data.keys())
+group_arrays = [lag_group_df.loc[lag_group_df["group"] == g, "lag_trials"].to_numpy() for g in group_order]
+
+if all(len(arr) >= 2 for arr in group_arrays):
+    f_stat, anova_p = f_oneway(*group_arrays)
+    k = len(group_arrays)
+    n_total = int(np.sum([len(arr) for arr in group_arrays]))
+    df_between = k - 1
+    df_within = n_total - k
+    eta_sq = (f_stat * df_between) / (f_stat * df_between + df_within) if np.isfinite(f_stat) else np.nan
+
+    lag_group_anova = pd.DataFrame([
+        {
+            "F": f_stat,
+            "p": anova_p,
+            "df_between": df_between,
+            "df_within": df_within,
+            "eta_sq": eta_sq,
+        }
+    ])
+
+    print("\nOne-way ANOVA on optimal lag by group")
+    display(lag_group_anova.round(4))
+
+    if anova_p < 0.05:
+        print("ANOVA is significant (p < 0.05); running post hoc tests.")
+        try:
+            from statsmodels.stats.multicomp import pairwise_tukeyhsd
+
+            tukey = pairwise_tukeyhsd(
+                endog=lag_group_df["lag_trials"],
+                groups=lag_group_df["group"],
+                alpha=0.05,
+            )
+            lag_group_posthoc = pd.DataFrame(
+                tukey.summary().data[1:],
+                columns=tukey.summary().data[0],
+            )
+            for col in ["meandiff", "p-adj", "lower", "upper"]:
+                lag_group_posthoc[col] = pd.to_numeric(lag_group_posthoc[col], errors="coerce")
+
+            print("Tukey HSD post hoc results")
+            display(lag_group_posthoc.round(4))
+        except Exception as exc:
+            print(f"Tukey HSD unavailable ({exc}); using Welch t-tests with Bonferroni correction.")
+            posthoc_rows = []
+            for g1, g2 in combinations(group_order, 2):
+                arr1 = lag_group_df.loc[lag_group_df["group"] == g1, "lag_trials"].to_numpy()
+                arr2 = lag_group_df.loc[lag_group_df["group"] == g2, "lag_trials"].to_numpy()
+                t_stat_pair, p_pair = ttest_ind(arr1, arr2, equal_var=False)
+                posthoc_rows.append({
+                    "group1": g1,
+                    "group2": g2,
+                    "mean_diff": np.mean(arr1) - np.mean(arr2),
+                    "t_stat": t_stat_pair,
+                    "p_uncorrected": p_pair,
+                })
+
+            lag_group_posthoc = pd.DataFrame(posthoc_rows)
+            lag_group_posthoc["p_bonf"] = np.minimum(
+                lag_group_posthoc["p_uncorrected"] * len(lag_group_posthoc),
+                1.0,
+            )
+            lag_group_posthoc["significant_bonf"] = lag_group_posthoc["p_bonf"] < 0.05
+
+            print("Pairwise Welch t-tests post hoc results")
+            display(lag_group_posthoc.round(4))
+    else:
+        print("ANOVA is not significant (p >= 0.05); post hoc tests not run.")
+else:
+    print("Not enough observations per group for ANOVA (need at least n=2 in each group).")
+
+# %%
 # Plot histogram of lags (full data)
 f, ax = plt.subplots(figsize=(1.6, 1.8),
                      gridspec_kw={"left": 0.25, "right": 0.95, "top": 0.93, "bottom": 0.25})
@@ -452,13 +617,18 @@ cross_corr_not_dep45 = pd.concat([
 f, ax = plt.subplots(figsize=(1.8, 1.8),
                      gridspec_kw={"left": 0.35, "right": 0.95, "top": 0.93, "bottom": 0.25})
 
+# rng = np.random.default_rng(7)
+np.random.seed(123)
+jitter_width = 0.08
+
 for idx, df in enumerate([
     cross_corr_replete_10NaCl,
     cross_corr_replete_45NaCl,
     cross_corr_deplete_10NaCl,
     cross_corr_deplete_45NaCl,
 ]):
-    ax.scatter([idx]*len(df), df.pearson_r.values, color=colors[idx], alpha=0.7, edgecolor='k', linewidth=0.5, s=30)
+    x_jitter = idx + np.random.uniform(-jitter_width, jitter_width, size=len(df))
+    ax.scatter(x_jitter, df.pearson_r.values, color=colors[idx], alpha=0.7, edgecolor='k', linewidth=0.5, s=30)
     ax.bar(idx, df.pearson_r.mean(), color=colors[idx], alpha=0.5)
 
 ax.set_xticks((0, 1, 2, 3))
@@ -472,6 +642,94 @@ sns.despine(ax=ax)
 
 if SAVE_FIGS:
     save_figure_atomic(f, "fig3_optimal_lag_correlation_all_conds", FIGSFOLDER)
+
+# %%
+# Stats: test whether Pearson r differs across groups
+from itertools import combinations
+from scipy.stats import f_oneway, ttest_ind
+
+r_group_data = {
+    "replete_10NaCl": cross_corr_replete_10NaCl["pearson_r"].dropna().to_numpy(dtype=float),
+    "replete_45NaCl": cross_corr_replete_45NaCl["pearson_r"].dropna().to_numpy(dtype=float),
+    "deplete_10NaCl": cross_corr_deplete_10NaCl["pearson_r"].dropna().to_numpy(dtype=float),
+    "deplete_45NaCl": cross_corr_deplete_45NaCl["pearson_r"].dropna().to_numpy(dtype=float),
+}
+
+group_order = list(r_group_data.keys())
+group_arrays = [r_group_data[g] for g in group_order]
+
+if all(len(arr) >= 2 for arr in group_arrays):
+    f_stat, anova_p = f_oneway(*group_arrays)
+    k = len(group_arrays)
+    n_total = int(np.sum([len(arr) for arr in group_arrays]))
+    df_between = k - 1
+    df_within = n_total - k
+    eta_sq = (f_stat * df_between) / (f_stat * df_between + df_within) if np.isfinite(f_stat) else np.nan
+
+    pearson_group_anova = pd.DataFrame([
+        {
+            "F": f_stat,
+            "p": anova_p,
+            "df_between": df_between,
+            "df_within": df_within,
+            "eta_sq": eta_sq,
+        }
+    ])
+
+    print("One-way ANOVA on Pearson r by group")
+    display(pearson_group_anova.round(4))
+
+    if anova_p < 0.05:
+        print("ANOVA is significant (p < 0.05); running post hoc tests.")
+        try:
+            from statsmodels.stats.multicomp import pairwise_tukeyhsd
+
+            r_group_df = pd.concat(
+                [pd.DataFrame({"group": g, "pearson_r": vals}) for g, vals in r_group_data.items()],
+                ignore_index=True,
+            )
+            tukey = pairwise_tukeyhsd(
+                endog=r_group_df["pearson_r"],
+                groups=r_group_df["group"],
+                alpha=0.05,
+            )
+            pearson_group_posthoc = pd.DataFrame(
+                tukey.summary().data[1:],
+                columns=tukey.summary().data[0],
+            )
+            for col in ["meandiff", "p-adj", "lower", "upper"]:
+                pearson_group_posthoc[col] = pd.to_numeric(pearson_group_posthoc[col], errors="coerce")
+
+            print("Tukey HSD post hoc results")
+            display(pearson_group_posthoc.round(4))
+        except Exception as exc:
+            print(f"Tukey HSD unavailable ({exc}); using Welch t-tests with Bonferroni correction.")
+            posthoc_rows = []
+            for g1, g2 in combinations(group_order, 2):
+                arr1 = r_group_data[g1]
+                arr2 = r_group_data[g2]
+                t_stat_pair, p_pair = ttest_ind(arr1, arr2, equal_var=False)
+                posthoc_rows.append({
+                    "group1": g1,
+                    "group2": g2,
+                    "mean_diff": np.mean(arr1) - np.mean(arr2),
+                    "t_stat": t_stat_pair,
+                    "p_uncorrected": p_pair,
+                })
+
+            pearson_group_posthoc = pd.DataFrame(posthoc_rows)
+            pearson_group_posthoc["p_bonf"] = np.minimum(
+                pearson_group_posthoc["p_uncorrected"] * len(pearson_group_posthoc),
+                1.0,
+            )
+            pearson_group_posthoc["significant_bonf"] = pearson_group_posthoc["p_bonf"] < 0.05
+
+            print("Pairwise Welch t-tests post hoc results")
+            display(pearson_group_posthoc.round(4))
+    else:
+        print("ANOVA is not significant (p >= 0.05); post hoc tests not run.")
+else:
+    print("Not enough observations per group for ANOVA (need at least n=2 in each group).")
 
 # %%
 bw=0.75
