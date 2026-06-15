@@ -6,10 +6,6 @@
 #       format_name: percent
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
-#   kernelspec:
-#     display_name: default
-#     language: python
-#     name: python3
 # ---
 
 # %% [markdown]
@@ -32,6 +28,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import dill
+
+from scipy.stats import linregress
 
 from matplotlib.colors import to_hex
 
@@ -98,139 +96,74 @@ def make_auc_data_per_trial(x_array, condition, infusiontype, y_col):
 deplete_10 = make_auc_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
 deplete_45 = make_auc_data_per_trial(x_array, "deplete", "45NaCl", "simba_median_balance")
 
-# %%
-f = make_correlation_plot_simba(deplete_10, deplete_45, colors[0], colors[1], yaxis=True)
-
-# %%
-from scipy.stats import linregress
-
-scaling_factor_100mM = 2.3376
-scaling_factor_450mM = 2.3376 * 4.5
-
-f, ax = plt.subplots(figsize=(1.8, 1.8))
-
-x_vals_100 = np.arange(0,49)*scaling_factor_100mM
-# ax.scatter(x_vals_100, deplete_10, color=colors[0], label="10 mM NaCl", alpha=0.3)
-
-ax.plot(x_vals_100, deplete_10, color=colors[2], alpha=0.7)
-
-# a, b, r_value, p_value, std_err = linregress(x_vals_100, deplete_10)
-# ax.plot(x_vals_100, a*x_vals_100 + b, color=colors[0], alpha=1)
-
-x_vals_450 = np.arange(0,49)*scaling_factor_450mM
-# ax.scatter(x_vals_450, deplete_45, color=colors[1], label="45 mM NaCl", alpha=0.3)
-ax.plot(x_vals_450, deplete_45, color=colors[3], alpha=0.7)
-
-# a, b, r_value, p_value, std_err = linregress(x_vals_450, deplete_45)
-# ax.plot(x_vals_450, a*x_vals_450 + b, color=colors[1], alpha=1)
-
-ax.set_xlabel("NaCl consumed (mg)")
-ax.set_ylabel("Appetitive behaviour")
-
-sns.despine(ax=ax, offset=5)
-
-# %%
-deplete_10_behav = make_auc_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
-deplete_45_behav = make_auc_data_per_trial(x_array, "deplete", "45NaCl", "simba_median_balance")
-
-deplete_10_da = make_auc_data_per_trial(x_array, "deplete", "10NaCl", "auc_snips")
-deplete_45_da = make_auc_data_per_trial(x_array, "deplete", "45NaCl", "auc_snips")
-
-# %%
-from scipy.stats import linregress
-
-scaling_factor_100mM = 2.3376
-scaling_factor_450mM = 2.3376 * 4.5
-
-f, ax = plt.subplots(figsize=(1.8, 1.8))
-
-x_vals_100 = np.arange(0,49)*scaling_factor_100mM
-# ax.scatter(x_vals_100, deplete_10, color=colors[2], label="10 mM NaCl", alpha=0.3)
-
-ax.plot(x_vals_100, deplete_10, color=colors[2], alpha=0.7)
-
-# a, b, r_value, p_value, std_err = linregress(x_vals_100, deplete_10)
-# ax.plot(x_vals_100, a*x_vals_100 + b, color=colors[0], alpha=1)
-
-x_vals_450 = np.arange(0,49)*scaling_factor_450mM
-# ax.scatter(x_vals_450, deplete_45, color=colors[3], label="45 mM NaCl", alpha=0.3)
-ax.plot(x_vals_450, deplete_45, color=colors[3], alpha=0.7)
-
-# a, b, r_value, p_value, std_err = linregress(x_vals_450, deplete_45)
-# ax.plot(x_vals_450, a*x_vals_450 + b, color=colors[1], alpha=1)
-
-ax.set_xlabel("NaCl consumed (mg)")
-ax.set_ylabel("Dopamine (AUC)")
-
-sns.despine(ax=ax, offset=5)
-
-
-# %%
-## Old figure with trial number on x-axis, for reference
-def make_triple_plot(x_vals_100, deplete_10, x_vals_450, deplete_45, colors=colors):
-    f, ax = plt.subplots(ncols=3, figsize=(5, 1.8), sharey=True,
-                         gridspec_kw={"wspace": 0.5, "width_ratios": [0.2, 0.2, 0.6],
-                                      "bottom": 0.3})
+def make_auc_and_sem_data_per_trial(x_array, condition, infusiontype, y_col):
     
-    ax[0].scatter(x_vals_100, deplete_10, color=colors[2], label="10 mM NaCl", alpha=0.3, clip_on=False)
-    ax[1].scatter(x_vals_450, deplete_45, color=colors[3], label="45 mM NaCl", alpha=0.3, clip_on=False)
+    grouped = (
+        x_array
+        .query("condition == @condition & infusiontype == @infusiontype")
+        .groupby("trial")[y_col]
+    )
     
-    ax[1].axvspan(np.min(x_vals_100), np.max(x_vals_100), color="k", alpha=0.05, zorder=-10)
-    
-    # ax[0].set_xlim(ax[1].get_xlim())
+    auc_data = (grouped.mean().values)
+    sem_data = (grouped.sem().values)
 
-    ax[2].plot(x_vals_100, deplete_10, color=colors[2], alpha=0.5, marker="o")
-    
-    x_vals_450_red, deplete_45_red = zip(*[(x, y) for x, y in zip(x_vals_450, deplete_45) if x <= np.max(x_vals_100)])
-    ax[2].plot(x_vals_450_red, deplete_45_red, color=colors[3], alpha=0.7, marker="o")
-    
-    for axis in ax:
-        axis.set_xlabel("NaCl (mg)")
-        sns.despine(ax=axis, offset=5)
+    return auc_data, sem_data
 
-    return f, ax
-
-deplete_10_behav = make_auc_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
-deplete_45_behav = make_auc_data_per_trial(x_array, "deplete", "45NaCl", "simba_median_balance")
-
-deplete_10_da = make_auc_data_per_trial(x_array, "deplete", "10NaCl", "auc_snips")
-deplete_45_da = make_auc_data_per_trial(x_array, "deplete", "45NaCl", "auc_snips")
-
-f, ax = make_triple_plot(x_vals_100, deplete_10_behav, x_vals_450, deplete_45_behav, colors=colors)
-ax[0].set_ylabel("Appetitive behaviour")
-
-f, ax = make_triple_plot(x_vals_100, deplete_10_da, x_vals_450, deplete_45_da, colors=colors)
-ax[0].set_ylabel("Dopamine (AUC)")
+deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
 
 
 # %%
 # make panels with trial
-
-def make_trial_and_nacl_plot(x_vals_100, deplete_10, x_vals_450, deplete_45, colors=colors):
+def make_trial_and_nacl_plot(x_vals_100, deplete_100_mean, deplete_100_sem,
+                             x_vals_450, deplete_450_mean, deplete_450_sem,
+                             colors=colors, scattersize=15):
     
     f, ax = plt.subplots(ncols=3, figsize=(6, 1.8), sharey=True,
                          gridspec_kw={"wspace": 0.5, "width_ratios": [0.5, 0.5, 1.2],
                                       "bottom": 0.3})
     
     x_vals_trial = np.arange(0,49)
-    ax[0].scatter(x_vals_trial, deplete_10, color=colors[2], label="10 mM NaCl", alpha=0.3)
-    ax[0].scatter(x_vals_trial, deplete_45, color=colors[3], label="45 mM NaCl", alpha=0.3)
+    ax[0].scatter(x_vals_trial, deplete_100_mean,
+                  color=colors[2], label="10 mM NaCl", alpha=0.5, s=scattersize)
+    ax[0].fill_between(x_vals_trial,
+                       deplete_100_mean - deplete_100_sem,
+                       deplete_100_mean + deplete_100_sem,
+                       color=colors[2], alpha=0.3, zorder=-10)
     
+    ax[0].scatter(x_vals_trial, deplete_450_mean,
+                  color=colors[3], label="45 mM NaCl", alpha=0.5, s=scattersize)
+    ax[0].fill_between(x_vals_trial,
+                       deplete_450_mean - deplete_450_sem,
+                       deplete_450_mean + deplete_450_sem,
+                       color=colors[3], alpha=0.3, zorder=-10)
+
     ax[0].set_xlabel("Trial")
     ax[0].axhline(0, color="k", linestyle="--",alpha=0.3, zorder=-10)
     
-    ax[1].scatter(x_vals_100, deplete_10, color=colors[2], label="10 mM NaCl", alpha=0.3)
-    ax[1].scatter(x_vals_450, deplete_45, color=colors[3], label="45 mM NaCl", alpha=0.3)
+    ax[1].scatter(x_vals_100, deplete_100_mean,
+                  color=colors[2], label="10 mM NaCl", alpha=0.3, s=scattersize)
+    ax[1].fill_between(x_vals_100,
+                       deplete_100_mean - deplete_100_sem,
+                       deplete_100_mean + deplete_100_sem,
+                       color=colors[2], alpha=0.3, zorder=-10)
     
+    ax[1].scatter(x_vals_450, deplete_450_mean,
+                  color=colors[3], label="45 mM NaCl", alpha=0.5, s=scattersize)
+    ax[1].fill_between(x_vals_450,
+                       deplete_450_mean - deplete_450_sem,
+                       deplete_450_mean + deplete_450_sem,
+                       color=colors[3], alpha=0.3, zorder=-10)
+
     ax[1].axvspan(np.min(x_vals_100), np.max(x_vals_100), color="k", alpha=0.05, zorder=-10)
     
     ax[1].set_xlabel("NaCl (mg)")
     
+    ax[2].errorbar(x_vals_100, deplete_100_mean, yerr=deplete_100_sem, color=colors[2], alpha=0.5, marker="o")
     
-    ax[2].plot(x_vals_100, deplete_10, color=colors[2], alpha=0.5, marker="o")
+    x_vals_450_red, deplete_450_red, deplete_450_sem_red = zip(*[(x, y, err) for x, y, err in zip(x_vals_450, deplete_450_mean, deplete_450_sem) if x <= np.max(x_vals_100)])
     
-    x_vals_450_red, deplete_45_red = zip(*[(x, y) for x, y in zip(x_vals_450, deplete_45) if x <= np.max(x_vals_100)])
-    ax[2].plot(x_vals_450_red, deplete_45_red, color=colors[3], alpha=0.7, marker="o")
+    
+    ax[2].errorbar(x_vals_450_red, deplete_450_red, yerr=deplete_450_sem_red, color=colors[3], alpha=0.7, marker="o")
     
     ax[2].set_xlabel("NaCl (mg)")
     
@@ -241,16 +174,25 @@ def make_trial_and_nacl_plot(x_vals_100, deplete_10, x_vals_450, deplete_45, col
         
     return f, ax
 
-f, ax = make_trial_and_nacl_plot(x_vals_100, deplete_10_behav, x_vals_450, deplete_45_behav, colors=colors)
+deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "simba_median_balance")
+deplete_450_mean, deplete_450_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "45NaCl", "simba_median_balance")
+
+f, ax = make_trial_and_nacl_plot(x_vals_100, deplete_100_mean, deplete_100_sem, x_vals_450, deplete_450_mean, deplete_450_sem, colors=colors)
 ax[0].set_ylabel("Appetitive behaviour")
 save_figure_atomic(f, "fig5_nacl_behav", FIGSFOLDER)
 
-f, ax = make_trial_and_nacl_plot(x_vals_100, deplete_10_da, x_vals_450, deplete_45_da, colors=colors)
+deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "auc_snips")
+deplete_450_mean, deplete_450_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "45NaCl", "auc_snips")
+
+f, ax = make_trial_and_nacl_plot(x_vals_100, deplete_100_mean, deplete_100_sem, x_vals_450, deplete_450_mean, deplete_450_sem, colors=colors)
 ax[0].set_ylabel("Dopamine (AUC)")
 save_figure_atomic(f, "fig5_nacl_da", FIGSFOLDER)
 
-
 # %%
+# do stats on data as a function of trial first
+# so anova with trial and condition as factors, then do regression of behavior vs da per trial
+
+
 
 # %%
 import numpy as np
