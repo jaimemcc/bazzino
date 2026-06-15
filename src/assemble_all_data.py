@@ -150,6 +150,13 @@ PARAMS = {
     "transition_condition": "deplete",
     "transition_infusion": "45NaCl",
     "logistic_maxfev": 60000,
+    # Dopamine transition method for realignment:
+    #   - "max_velocity": use the trial of maximum negative derivative
+    #     from the selected DA summary signal
+    #   - "sigmoid_cluster": fit the legacy cluster-based logistic transition
+    "da_transition_method": "max_velocity",
+    "da_transition_signal_col": "auc_snips",
+    "da_velocity_smoothing_window": 5,
     # Behavioral transition mode for realignment:
     #   - "median_balance": continuous sigmoid on simba_median_balance
     #   - "binarized": logistic fit on thresholded simba_median_balance (middle values ignored)
@@ -167,7 +174,7 @@ PARAMS = {
     #   - "sigmoid": fit a continuous sigmoid to the signal (existing default)
     #   - "max_velocity" (or legacy alias "velocity"): use the trial of
     #     maximum negative derivative (steepest decline)
-    "behavior_transition_method": "velocity",
+    "behavior_transition_method": "max_velocity",
     # Smoothing window (must be odd) for the derivative when using "max_velocity".
     "behavior_velocity_smoothing_window": 5,
 
@@ -180,8 +187,8 @@ PARAMS = {
     # If the cache file doesn't exist, the step runs from scratch regardless.
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
-    "cache_simba": False,          # Skip Simba extraction, load from cache
-    "cache_clustering": False,     # Skip PCA + spectral clustering, load from cache
+    "cache_simba": True,          # Skip Simba extraction, load from cache
+    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip transition fitting, load from cache
 
     # Cache filenames (in data_folder)
@@ -1004,34 +1011,20 @@ def find_behavioral_transitions(x_array, params, signal_col="simba_median_balanc
     return fits_df_behav
 
 
-def find_velocity_transitions(x_array, params, signal_col=None):
-    """Find per-rat behavioral transition using maximum negative velocity (derivative).
+def find_max_velocity_transitions(
+    x_array,
+    params,
+    signal_col,
+    smoothing_window,
+    label="behavioral",
+):
+    """Find per-rat transition using maximum negative velocity (derivative).
 
     Computes the smoothed first derivative of *signal_col* for each rat in the
     deplete + 45NaCl subset and returns the trial at which the most negative
     velocity (steepest behavioural decline) occurs.
-
-    Parameters
-    ----------
-    x_array : pd.DataFrame
-        Full assembled trial-level DataFrame.
-    params : dict
-        Pipeline parameters.  Reads:
-          - ``behavior_transition_signal_col`` (default ``"simba_median_balance"``)
-          - ``behavior_velocity_smoothing_window`` (default ``3``, must be odd)
-          - ``transition_condition`` / ``transition_infusion`` for subsetting.
-    signal_col : str or None
-        Override the signal column; falls back to *params* if None.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: ``id``, ``x0_orig``, ``velocity_value``, ``n_trials``, ``success``.
-        Compatible with :func:`model_fit_helpers.build_realigned_trials`.
     """
-    if signal_col is None:
-        signal_col = params.get("behavior_transition_signal_col", "simba_median_balance")
-    window_size = int(params.get("behavior_velocity_smoothing_window", 3))
+    window_size = int(smoothing_window)
     if window_size % 2 == 0:
         window_size += 1  # enforce odd for symmetric smoothing
 
@@ -1039,7 +1032,7 @@ def find_velocity_transitions(x_array, params, signal_col=None):
     inf = params["transition_infusion"]
     df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
 
-    print(f"  Finding velocity-based transitions for {len(df_dep_45.id.unique())} rats")
+    print(f"  Finding {label} velocity-based transitions for {len(df_dep_45.id.unique())} rats")
     print(f"  Signal: {signal_col}, smoothing window: {window_size}")
 
     if signal_col not in df_dep_45.columns:
@@ -1074,10 +1067,36 @@ def find_velocity_transitions(x_array, params, signal_col=None):
 
     fits_df = pd.DataFrame(results)
     success_count = int(fits_df["success"].sum()) if not fits_df.empty else 0
-    print(f"  Velocity transitions: {success_count}/{len(fits_df)} rats")
+    print(f"  {label.capitalize()} velocity transitions: {success_count}/{len(fits_df)} rats")
     if not fits_df.empty:
         print(f"  Transition trials: {fits_df.loc[fits_df['success'], 'x0_orig'].round(1).tolist()}")
     return fits_df
+
+
+def find_velocity_transitions(x_array, params, signal_col=None):
+    """Find per-rat behavioral transition using maximum negative velocity (derivative)."""
+    if signal_col is None:
+        signal_col = params.get("behavior_transition_signal_col", "simba_median_balance")
+    return find_max_velocity_transitions(
+        x_array,
+        params,
+        signal_col=signal_col,
+        smoothing_window=params.get("behavior_velocity_smoothing_window", 3),
+        label="behavioral",
+    )
+
+
+def find_da_velocity_transitions(x_array, params, signal_col=None):
+    """Find per-rat DA transition using maximum negative velocity of a trial summary signal."""
+    if signal_col is None:
+        signal_col = params.get("da_transition_signal_col", "auc_snips")
+    return find_max_velocity_transitions(
+        x_array,
+        params,
+        signal_col=signal_col,
+        smoothing_window=params.get("da_velocity_smoothing_window", 5),
+        label="dopamine",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1114,6 +1133,22 @@ def get_mean_by_window(snips, start_bin=50, end_bin=150):
     """Calculate per-trial mean over a bin window."""
     snips = np.asarray(snips, dtype=float)
     return np.nanmean(snips[:, start_bin:end_bin], axis=1)
+
+
+def add_photometry_summary_columns(x_array, snips_photo, params):
+    """Add per-trial photometry summary features needed for DA transition methods."""
+    s = params["auc_start_bin"]
+    e = params["auc_end_bin"]
+    s_early = params.get("auc_early_start_bin", 50)
+    e_early = params.get("auc_early_end_bin", 80)
+    s_late = params.get("auc_late_start_bin", 80)
+    e_late = params.get("auc_late_end_bin", 150)
+
+    return x_array.assign(
+        auc_snips=get_auc_by_window(snips_photo, start_bin=s, end_bin=e),
+        auc_snips_early=get_auc_by_window(snips_photo, start_bin=s_early, end_bin=e_early),
+        auc_snips_late=get_auc_by_window(snips_photo, start_bin=s_late, end_bin=e_late),
+    )
 
 
 def sync_aligned_columns(target_df, source_df, merge_cols=None):
@@ -1217,16 +1252,40 @@ def _normalize_behavior_transition_method(method):
     return aliases[method_norm]
 
 
+def _normalize_da_transition_method(method):
+    """Normalize DA transition method names to canonical values."""
+    if method is None:
+        return "max_velocity"
+
+    method_norm = str(method).strip().lower()
+    aliases = {
+        "velocity": "max_velocity",
+        "max_velocity": "max_velocity",
+        "sigmoid": "sigmoid_cluster",
+        "cluster_sigmoid": "sigmoid_cluster",
+        "sigmoid_cluster": "sigmoid_cluster",
+    }
+    if method_norm not in aliases:
+        raise ValueError(
+            f"Unknown da_transition_method '{method}'. "
+            "Expected one of: max_velocity, velocity, sigmoid_cluster, cluster_sigmoid, sigmoid"
+        )
+    return aliases[method_norm]
+
+
 def _validate_transition_params(params):
     """Validate transition-related parameter values with clear errors."""
     allowed_methods = ["sigmoid", "max_velocity", "velocity"]
     allowed_modes = ["median_balance", "binarized", "quantized"]
+    allowed_da_methods = ["max_velocity", "velocity", "sigmoid_cluster", "cluster_sigmoid", "sigmoid"]
 
     method_raw = params.get("behavior_transition_method", "sigmoid")
     mode_raw = params.get("behavior_transition_mode", "median_balance")
+    da_method_raw = params.get("da_transition_method", "max_velocity")
 
     method_norm = str(method_raw).strip().lower()
     mode_norm = str(mode_raw).strip().lower()
+    da_method_norm = str(da_method_raw).strip().lower()
 
     if method_norm not in allowed_methods:
         print(
@@ -1248,6 +1307,16 @@ def _validate_transition_params(params):
             f"Allowed values: {allowed_modes}"
         )
 
+    if da_method_norm not in allowed_da_methods:
+        print(
+            "ERROR: Invalid da_transition_method "
+            f"'{da_method_raw}'. Allowed values: {allowed_da_methods}"
+        )
+        raise ValueError(
+            f"Invalid da_transition_method '{da_method_raw}'. "
+            f"Allowed values: {allowed_da_methods}"
+        )
+
     window = int(params.get("behavior_velocity_smoothing_window", 3))
     if window < 1:
         print(
@@ -1264,8 +1333,35 @@ def _validate_transition_params(params):
             f"({window}); code will auto-adjust to {window + 1} for symmetric smoothing."
         )
 
+    da_window = int(params.get("da_velocity_smoothing_window", 5))
+    if da_window < 1:
+        print(
+            "ERROR: Invalid da_velocity_smoothing_window "
+            f"'{da_window}'. Must be >= 1."
+        )
+        raise ValueError(
+            "da_velocity_smoothing_window must be >= 1"
+        )
 
-def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw=None):
+    if da_method_norm in ("max_velocity", "velocity") and da_window % 2 == 0:
+        print(
+            "WARNING: da_velocity_smoothing_window is even "
+            f"({da_window}); code will auto-adjust to {da_window + 1} for symmetric smoothing."
+        )
+
+
+def combine_and_realign(
+    x_photo,
+    snips_photo,
+    snips_movement,
+    snips_angvel,
+    fits_df_da,
+    fits_df_behav,
+    params,
+    snips_movement_raw=None,
+    fits_df_da_velocity=None,
+    fits_df_da_cluster=None,
+):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
     """
@@ -1279,13 +1375,6 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    s_early = params.get("auc_early_start_bin", 50)
-    e_early = params.get("auc_early_end_bin", 80)
-    s_late = params.get("auc_late_start_bin", 80)
-    e_late = params.get("auc_late_end_bin", 150)
-    auc_snips = get_auc_by_window(snips_photo, start_bin=s, end_bin=e)
-    auc_snips_early = get_auc_by_window(snips_photo, start_bin=s_early, end_bin=e_early)
-    auc_snips_late = get_auc_by_window(snips_photo, start_bin=s_late, end_bin=e_late)
     auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
     auc_angvel = get_auc_by_window(snips_angvel_smooth, start_bin=s, end_bin=e)
 
@@ -1304,10 +1393,7 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
         snips_angvel, threshold=params["angvel_threshold"],
         start_bin=s, end_bin=e)
 
-    x_combined = x_photo.assign(
-        auc_snips=auc_snips,
-        auc_snips_early=auc_snips_early,
-        auc_snips_late=auc_snips_late,
+    x_combined = add_photometry_summary_columns(x_photo, snips_photo, params).assign(
         auc_movement=auc_movement,
         auc_angvel=auc_angvel,
         time_moving=time_moving,
@@ -1319,10 +1405,22 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
         x_combined = x_combined.assign(time_moving_raw=time_moving_raw)
 
     realigned_trials_da = build_realigned_trials(x_combined, fits_df_da, "realigned_trials_da")
+    realigned_trials_da_velocity = build_realigned_trials(
+        x_combined,
+        fits_df_da_velocity if fits_df_da_velocity is not None else fits_df_da,
+        "realigned_trials_da_velocity",
+    )
+    realigned_trials_da_cluster = build_realigned_trials(
+        x_combined,
+        fits_df_da_cluster if fits_df_da_cluster is not None else fits_df_da,
+        "realigned_trials_da_cluster",
+    )
     realigned_trials_behav = build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
 
     x_combined = x_combined.assign(
         realigned_trials_da=realigned_trials_da,
+        realigned_trials_da_velocity=realigned_trials_da_velocity,
+        realigned_trials_da_cluster=realigned_trials_da_cluster,
         realigned_trials_behav=realigned_trials_behav,
         # Backward-compat alias while notebooks migrate to the clearer DA-specific name.
         trial_aligned=realigned_trials_da,
@@ -1342,6 +1440,9 @@ def combine_and_realign(x_photo, snips_photo, snips_movement, snips_angvel, fits
     print(
         f"  Added realigned_trials_da column "
         f"(NaN for {(x_combined['realigned_trials_da'].isna()).sum()} trials without DA fits)"
+    )
+    print(
+        f"  Added realigned_trials_da_velocity and realigned_trials_da_cluster comparison columns"
     )
     print(
         f"  Added realigned_trials_behav column "
@@ -1497,9 +1598,8 @@ def run_pipeline(params=None):
     if cached is not None:
         x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
 
-    # Step 6: Sigmoidal transitions
-    # Uses deterministic clustering (random_state=0) to generate consistent results
-    print("\nSTEP 6: Calculate sigmoidal transitions")
+    # Step 6: Transition fitting
+    print("\nSTEP 6: Calculate transitions")
     print("=" * 60)
     transitions_cache_path = data_folder / params["cache_transitions_file"]
     if params["cache_transitions"]:
@@ -1524,31 +1624,69 @@ def run_pipeline(params=None):
     )
     if cached_method is not None:
         cached_method = _normalize_behavior_transition_method(cached_method)
+
+    cached_da_method = None
+    cached_da_signal_col = None
+    cached_da_window = None
+    if cached is not None:
+        cached_da_method = cached.get("da_transition_method")
+        cached_da_signal_col = cached.get("da_transition_signal_col")
+        cached_da_window = cached.get("da_velocity_smoothing_window")
+        if "_cached_params" in cached:
+            cached_da_method = cached_da_method or cached["_cached_params"].get("da_transition_method")
+            cached_da_signal_col = cached_da_signal_col or cached["_cached_params"].get("da_transition_signal_col")
+            if cached_da_window is None:
+                cached_da_window = cached["_cached_params"].get("da_velocity_smoothing_window")
+
+    current_da_method = _normalize_da_transition_method(
+        params.get("da_transition_method", "max_velocity")
+    )
+    if cached_da_method is not None:
+        cached_da_method = _normalize_da_transition_method(cached_da_method)
+    current_da_signal_col = params.get("da_transition_signal_col", "auc_snips")
+    current_da_window = int(params.get("da_velocity_smoothing_window", 5))
     current_mode = params.get("behavior_transition_mode", "median_balance")
+
+    x_combined = add_photometry_summary_columns(x_combined, snips_photo, params)
+
     cache_valid = (
         cached is not None
         and "fits_df" in cached
         and "fits_df_behav" in cached
+        and "fits_df_da_velocity" in cached
+        and "fits_df_da_cluster" in cached
         and cache_mode == current_mode
         and cached_method == current_method
+        and cached_da_method == current_da_method
+        and cached_da_signal_col == current_da_signal_col
+        and int(cached_da_window) == current_da_window
     )
 
     if cache_valid:
         fits_df = cached["fits_df"]
         fits_df_da = cached.get("fits_df_da", fits_df)
+        fits_df_da_velocity = cached["fits_df_da_velocity"]
+        fits_df_da_cluster = cached["fits_df_da_cluster"]
         fits_df_behav = cached["fits_df_behav"]
         print(
             f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits "
-            f"(method={current_method}, mode={cache_mode})"
+            f"(behavior method={current_method}, behavior mode={cache_mode}, da method={current_da_method})"
         )
     else:
         if cached is not None:
             print(
-                f"  Transition cache mismatch (cached method={cached_method}/{cache_mode}, "
-                f"current={current_method}/{current_mode}); recomputing transitions."
+                f"  Transition cache mismatch (cached behavior={cached_method}/{cache_mode}, "
+                f"cached DA={cached_da_method}/{cached_da_signal_col}/{cached_da_window}; "
+                f"current behavior={current_method}/{current_mode}, "
+                f"current DA={current_da_method}/{current_da_signal_col}/{current_da_window}); recomputing transitions."
             )
-        print(f"  Calculating transitions from deterministic clustering (random_state=0)")
-        fits_df_da = find_sigmoidal_transitions(x_combined, params)
+        print("  Calculating DA transitions using both comparison methods")
+        fits_df_da_cluster = find_sigmoidal_transitions(x_combined, params)
+        fits_df_da_velocity = find_da_velocity_transitions(x_combined, params)
+        if current_da_method == "max_velocity":
+            fits_df_da = fits_df_da_velocity
+        else:
+            fits_df_da = fits_df_da_cluster
         if current_method == "max_velocity":
             fits_df_behav = find_velocity_transitions(x_combined, params)
         else:
@@ -1559,7 +1697,12 @@ def run_pipeline(params=None):
             {
                 "fits_df": fits_df_da,
                 "fits_df_da": fits_df_da,
+                "fits_df_da_velocity": fits_df_da_velocity,
+                "fits_df_da_cluster": fits_df_da_cluster,
                 "fits_df_behav": fits_df_behav,
+                "da_transition_method": current_da_method,
+                "da_transition_signal_col": current_da_signal_col,
+                "da_velocity_smoothing_window": current_da_window,
                 "behavior_transition_mode": current_mode,
                 "behavior_transition_method": current_method,
                 "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
@@ -1578,7 +1721,16 @@ def run_pipeline(params=None):
 
     # Step 7: Combine and realign
     x_combined, z_dep45 = combine_and_realign(
-        x_combined, snips_photo, snips_movement, snips_angvel, fits_df_da, fits_df_behav, params, snips_movement_raw
+        x_combined,
+        snips_photo,
+        snips_movement,
+        snips_angvel,
+        fits_df_da,
+        fits_df_behav,
+        params,
+        snips_movement_raw,
+        fits_df_da_velocity=fits_df_da_velocity,
+        fits_df_da_cluster=fits_df_da_cluster,
     )
 
     # Create metadata about data processing
@@ -1594,6 +1746,9 @@ def run_pipeline(params=None):
         "simba_shift_frames": params.get("simba_shift_frames", 300),
         "simba_n_shuffles": params.get("simba_n_shuffles", 1000),
         "simba_ci_percentile": params.get("simba_ci_percentile", 97.5),
+        "da_transition_method": current_da_method,
+        "da_transition_signal_col": current_da_signal_col,
+        "da_velocity_smoothing_window": current_da_window,
         "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
         "behavior_transition_method": current_method,
         "behavior_velocity_smoothing_window": params.get("behavior_velocity_smoothing_window", 3),
@@ -1632,6 +1787,8 @@ def run_pipeline(params=None):
         "pca_transformed": pca_transformed,
         "fits_df": fits_df,
         "fits_df_da": fits_df_da,
+        "fits_df_da_velocity": fits_df_da_velocity,
+        "fits_df_da_cluster": fits_df_da_cluster,
         "fits_df_behav": fits_df_behav,
         "z_dep45": z_dep45,
         "metadata": metadata,
@@ -1660,7 +1817,10 @@ def run_pipeline(params=None):
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"  fits_df_da shape:  {fits_df_da.shape}")
+    print(f"  fits_df_da_velocity shape:  {fits_df_da_velocity.shape}")
+    print(f"  fits_df_da_cluster shape:  {fits_df_da_cluster.shape}")
     print(f"  fits_df_behav shape: {fits_df_behav.shape}")
+    print(f"  dopamine transition method: {metadata['da_transition_method']}")
     print(f"  behavioral transition method: {metadata['behavior_transition_method']}")
     print(f"  behavioral transition mode: {metadata['behavior_transition_mode']}")
     print(f"\nData processing metadata:")
