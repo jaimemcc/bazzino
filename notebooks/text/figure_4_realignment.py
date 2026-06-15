@@ -48,7 +48,8 @@ from figure_config import (
 
 from figure_plotting import (plot_auc_and_sigmoid, plot_realigned_behaviour,
                              make_realignment_panel_behav_and_da,
-                             make_realignment_panel_only_one_parameter
+                             make_realignment_panel_only_one_parameter,
+                             make_realignment_slope_panel
 )
 
 from model_fit_helpers import (
@@ -117,29 +118,29 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
     min_trial, max_trial = midway_point - ntrials_for_slope, midway_point + ntrials_for_slope
     df_orig_for_slope = df_original.query("trial >= @min_trial and trial <= @max_trial").copy()
 
-    popt_behav_orig = fit_sigmoid(df, "trial", simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
-    popt_behav_realigned = fit_sigmoid(df_realigned, realignment_col, simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
-    popt_da_orig = fit_sigmoid(df, "trial", da_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_da_k)
-    popt_da_realigned = fit_sigmoid(df_realigned, realignment_col, da_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_da_k)
+    # popt_behav_orig = fit_sigmoid(df, "trial", simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
+    # popt_behav_realigned = fit_sigmoid(df_realigned, realignment_col, simba_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_behav_k)
+    # popt_da_orig = fit_sigmoid(df, "trial", da_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_da_k)
+    # popt_da_realigned = fit_sigmoid(df_realigned, realignment_col, da_col, fit_to_raw_data=FIT_TO_RAW_DATA, initial_k=initial_da_k)
 
-    k_behav_orig = popt_behav_orig[2] if np.all(np.isfinite(popt_behav_orig)) else np.nan
-    k_behav_realigned = popt_behav_realigned[2] if np.all(np.isfinite(popt_behav_realigned)) else np.nan
-    k_da_orig = popt_da_orig[2] if np.all(np.isfinite(popt_da_orig)) else np.nan
-    k_da_realigned = popt_da_realigned[2] if np.all(np.isfinite(popt_da_realigned)) else np.nan
+    # k_behav_orig = popt_behav_orig[2] if np.all(np.isfinite(popt_behav_orig)) else np.nan
+    # k_behav_realigned = popt_behav_realigned[2] if np.all(np.isfinite(popt_behav_realigned)) else np.nan
+    # k_da_orig = popt_da_orig[2] if np.all(np.isfinite(popt_da_orig)) else np.nan
+    # k_da_realigned = popt_da_realigned[2] if np.all(np.isfinite(popt_da_realigned)) else np.nan
 
     return {
         "df_original": df_original,
         "df_orig_for_slope": df_orig_for_slope,
         "df_realigned": df_realigned,
         "df_reali_for_slope": df_reali_for_slope,
-        "k_behav_orig": k_behav_orig,
-        "k_behav_realigned": k_behav_realigned,
-        "k_da_orig": k_da_orig,
-        "k_da_realigned": k_da_realigned,
-        "popt_behav_orig": popt_behav_orig,
-        "popt_behav_realigned": popt_behav_realigned,
-        "popt_da_orig": popt_da_orig,
-        "popt_da_realigned": popt_da_realigned,
+        # "k_behav_orig": k_behav_orig,
+        # "k_behav_realigned": k_behav_realigned,
+        # "k_da_orig": k_da_orig,
+        # "k_da_realigned": k_da_realigned,
+        # "popt_behav_orig": popt_behav_orig,
+        # "popt_behav_realigned": popt_behav_realigned,
+        # "popt_da_orig": popt_da_orig,
+        # "popt_da_realigned": popt_da_realigned,
         "ntrials_for_slope": ntrials_for_slope,
     }
 
@@ -148,36 +149,47 @@ def prepare_shared_data(df, realignment_col, da_col, simba_col, initial_da_k=-1,
 # %%
 # new figure 4
 
+# prep data for realignment panels
 DA_COLUMN = "auc_snips"
 SIMBA_COLUMN = "simba_median_balance"
-REALIGNMENT_COLUMN = "realigned_trials_behav"
+
 RATS_TO_EXCLUDE = ["PB27", # This rat has a v poor fits of behavioral data
                    #"PB71" # This rat is on the edge, changes behavior and then goes into passive drip mode
                    ] 
 
-subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
-data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN)
+# realigning behavior to da
+REALIGNMENT_COLUMN_TO_DA = "realigned_trials_da"
+OFFSET = 3
+subset_aligned_to_da = get_realigned_data(x_array, REALIGNMENT_COLUMN_TO_DA, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
+data_for_figure_to_da = prepare_shared_data(subset_aligned_to_da, REALIGNMENT_COLUMN_TO_DA, DA_COLUMN, SIMBA_COLUMN, ntrials_for_slope=5, offset=OFFSET)
 
-fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, SIMBA_COLUMN, "behav",
+fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_da, REALIGNMENT_COLUMN_TO_DA, SIMBA_COLUMN, "behav",
                                           color=BEHAV_COLOR, do_not_plot_sigmoid=True)
 
-ax[0].axvline(21, color="gray", linestyle="--", alpha=0.5)
-ax[1].axvline(0, color="gray", linestyle="--", alpha=0.5)
+ax[0].axvline(17+OFFSET, color="gray", linestyle="--", alpha=0.5)
+ax[1].axvline(OFFSET, color="gray", linestyle="--", alpha=0.5)
 
 save_figure_atomic(fig, "fig4_realignment_behaviour", FIGSFOLDER)
 
-fig, ax = make_realignment_panel_only_one_parameter(data_for_figure, REALIGNMENT_COLUMN, DA_COLUMN, "da",
+# realigning da to behav
+
+REALIGNMENT_COLUMN_TO_BEHAV = "realigned_trials_behav"
+OFFSET = -3
+subset_aligned_to_behav = get_realigned_data(x_array, REALIGNMENT_COLUMN_TO_BEHAV, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
+data_for_figure_to_behav = prepare_shared_data(subset_aligned_to_behav, REALIGNMENT_COLUMN_TO_BEHAV, DA_COLUMN, SIMBA_COLUMN, ntrials_for_slope=5, offset=OFFSET)
+
+fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_behav, REALIGNMENT_COLUMN_TO_BEHAV, DA_COLUMN, "da",
                                           color=DA_COLOR, do_not_plot_sigmoid=True)
 
-ax[0].axvline(18, color="gray", linestyle=":", alpha=0.5)
-ax[1].axvline(-3, color="gray", linestyle=":", alpha=0.5)
+ax[0].axvline(18+OFFSET, color="gray", linestyle=":", alpha=0.5)
+ax[1].axvline(OFFSET, color="gray", linestyle=":", alpha=0.5)
 save_figure_atomic(fig, "fig4_realignment_da", FIGSFOLDER)
 
 
 # %%
-from figure_plotting import make_realignment_slope_panel
+# make slope panels
 
-f, ax, slopes =make_realignment_slope_panel(data_for_figure, SIMBA_COLUMN, REALIGNMENT_COLUMN,
+f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_da, SIMBA_COLUMN, REALIGNMENT_COLUMN_TO_DA,
                              color=BEHAV_COLOR)
 
 ax.set_yticks([ -0.5, 0, 0.5, 1])
@@ -190,16 +202,15 @@ save_figure_atomic(f, "fig4_realignment_slope_behav", FIGSFOLDER)
 print("Behaviour slopes")
 orig = slopes["trial"]
 print("Orig. slope = {: .3f}".format(orig["slope"]))
+print("Orig. r = {: .3f}".format(orig["r"]))
 print("Orig. p-value (H0: slope = 0) = {:.4g}".format(orig["p"]))
 print("Orig. significant vs 0:", "yes" if orig["p"] < 0.05 else "no")
-print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
-print("Reali. p-value (H0: slope = 0) = {:.4g}".format(slopes["realigned_trials_behav"]["p"]))
-print("Reali. significant vs 0:", "yes" if slopes["realigned_trials_behav"]["p"] < 0.05 else "no")
+print("Reali. slope = {: .3f}".format(slopes["realigned_trials_da"]["slope"]))
+print("Reali. r = {: .3f}".format(slopes["realigned_trials_da"]["r"]))
+print("Reali. p-value (H0: slope = 0) = {:.4g}".format(slopes["realigned_trials_da"]["p"]))
+print("Reali. significant vs 0:", "yes" if slopes["realigned_trials_da"]["p"] < 0.05 else "no")
 
-subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
-data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN, offset=-3)
-
-f, ax, slopes =make_realignment_slope_panel(data_for_figure, DA_COLUMN, REALIGNMENT_COLUMN,
+f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_behav, DA_COLUMN, REALIGNMENT_COLUMN_TO_BEHAV,
                              color=DA_COLOR)
 
 
@@ -212,16 +223,18 @@ save_figure_atomic(f, "fig4_realignment_slope_da", FIGSFOLDER)
 
 print("Dopamine slopes")
 print("Orig. slope = {: .3f}".format(slopes["trial"]["slope"]))
+print("Orig. r = {: .3f}".format(slopes["trial"]["r"]))
 print("Orig. p-value (H0: slope = 0) = {:.4g}".format(slopes["trial"]["p"]))
 print("Orig. significant vs 0:", "yes" if slopes["trial"]["p"] < 0.05 else "no")
 
 print("Reali. slope = {: .3f}".format(slopes["realigned_trials_behav"]["slope"]))
+print("Reali. r = {: .3f}".format(slopes["realigned_trials_behav"]["r"]))
 print("Reali. p-value (H0: slope = 0) = {:.4g}".format(slopes["realigned_trials_behav"]["p"]))
 print("Reali. significant vs 0:", "yes" if slopes["realigned_trials_behav"]["p"] < 0.05 else "no")
 
 
 # %%
-from bootstrap_and_shuffle_helpers import get_bootstrapped_distribution, get_bootstrapped_distribution_using_slopes
+from bootstrap_and_shuffle_helpers import get_bootstrapped_distribution, get_bootstrapped_distribution_using_slopes, get_bootstrapped_distribution_using_r
 
 N_BOOTSTRAPS = 1000
 BASE_BOOTSTRAP_SEED = 42
@@ -233,34 +246,38 @@ BASE_BOOTSTRAP_SEED = 42
 # subset_aligned = get_realigned_data(x_array, REALIGNMENT_COLUMN, rats_to_exclude=RATS_TO_EXCLUDE, verbose=False)
 # data_for_figure = prepare_shared_data(subset_aligned, REALIGNMENT_COLUMN, DA_COLUMN, SIMBA_COLUMN, ntrials_for_slope=5)
 
-df_orig_for_slope = data_for_figure["df_orig_for_slope"]
-df_reali_for_slope = data_for_figure["df_reali_for_slope"]
+# Use Pearson r for normalized cross-parameter comparison (behavior vs dopamine).
+df_orig_for_slope = data_for_figure_to_da["df_orig_for_slope"]
+df_reali_for_slope = data_for_figure_to_da["df_reali_for_slope"]
 
-bootstrapped_behav_orig = get_bootstrapped_distribution_using_slopes(
+bootstrapped_behav_orig = get_bootstrapped_distribution_using_r(
     df_orig_for_slope,
     "trial",
     SIMBA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 0,
 )
-bootstrapped_behav_realigned = get_bootstrapped_distribution_using_slopes(
+bootstrapped_behav_realigned = get_bootstrapped_distribution_using_r(
     df_reali_for_slope,
-    REALIGNMENT_COLUMN,
+    REALIGNMENT_COLUMN_TO_DA,
     SIMBA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 1,
 )
 
-bootstrapped_da_orig = get_bootstrapped_distribution_using_slopes(
+df_orig_for_slope = data_for_figure_to_behav["df_orig_for_slope"]
+df_reali_for_slope = data_for_figure_to_behav["df_reali_for_slope"]
+
+bootstrapped_da_orig = get_bootstrapped_distribution_using_r(
     df_orig_for_slope,
     "trial",
     DA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 2,
 )
-bootstrapped_da_realigned = get_bootstrapped_distribution_using_slopes(
+bootstrapped_da_realigned = get_bootstrapped_distribution_using_r(
     df_reali_for_slope,
-    REALIGNMENT_COLUMN,
+    REALIGNMENT_COLUMN_TO_BEHAV,
     DA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 3,
@@ -270,19 +287,23 @@ bootstrapped_da_realigned = get_bootstrapped_distribution_using_slopes(
 from figure_plotting import make_bootstrap_boxplot
 
 f, ax = make_bootstrap_boxplot([bootstrapped_behav_orig, bootstrapped_behav_realigned], BEHAV_COLOR)
-ax.set_yticks([-0.1, 0, 0.1])
+ax.set_ylabel("Pearson r")
+ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+ax.set_ylim(-0.8, 0.5)
 
 save_figure_atomic(f, "fig4_realignment_bootstrap_behaviour", FIGSFOLDER)
 
 f, ax = make_bootstrap_boxplot([bootstrapped_da_orig, bootstrapped_da_realigned], DA_COLOR)
-ax.set_yticks([-2, -1, 0, 1])
+ax.set_ylabel("Pearson r")
+ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+ax.set_ylim(-0.8, 0.5)
 
 save_figure_atomic(f, "fig4_realignment_bootstrap_da", FIGSFOLDER)
 
 
 # %%
 # Paired bootstrap-difference inference (realigned - original)
-def paired_bootstrap_diff_stats(orig, realigned, label, ci=(2.5, 97.5)):
+def paired_bootstrap_diff_stats(orig, realigned, label, ci=(2.5, 97.5), alternative="greater"):
     orig = np.asarray(orig, dtype=float)
     realigned = np.asarray(realigned, dtype=float)
 
@@ -303,16 +324,20 @@ def paired_bootstrap_diff_stats(orig, realigned, label, ci=(2.5, 97.5)):
     delta_mean = np.mean(deltas)
     ci_low, ci_high = np.percentile(deltas, ci)
 
-    # Two-sided bootstrap p-value for H0: delta == 0
-    p_left = (np.sum(deltas <= 0) + 1) / (n + 1)
-    p_right = (np.sum(deltas >= 0) + 1) / (n + 1)
-    p_two_sided = min(1.0, 2 * min(p_left, p_right))
+    # One-sided bootstrap p-value for H0: delta == 0
+    # alternative='greater' tests H1: delta > 0; 'less' tests H1: delta < 0
+    if alternative == "greater":
+        p_one_sided = (np.sum(deltas <= 0) + 1) / (n + 1)
+    elif alternative == "less":
+        p_one_sided = (np.sum(deltas >= 0) + 1) / (n + 1)
+    else:
+        raise ValueError("alternative must be 'greater' or 'less'")
 
     print(f"{label} (paired bootstrap delta = realigned - original)")
     print(f"  n valid pairs = {n}")
     print(f"  mean delta = {delta_mean:.6f}")
     print(f"  95% CI = [{ci_low:.6f}, {ci_high:.6f}]")
-    print(f"  two-sided bootstrap p = {p_two_sided:.6f}")
+    print(f"  one-sided bootstrap p ({alternative}) = {p_one_sided:.6f}")
 
     return deltas
 
@@ -321,12 +346,14 @@ delta_da = paired_bootstrap_diff_stats(
     bootstrapped_da_orig,
     bootstrapped_da_realigned,
     label="Dopamine",
+    alternative="less",
 )
 
 delta_behav = paired_bootstrap_diff_stats(
     bootstrapped_behav_orig,
     bootstrapped_behav_realigned,
     label="Behavior",
+    alternative="less",
 )
 
 # %%
@@ -338,10 +365,9 @@ fig, ax = plt.subplots(figsize=(2.3, 2.1),
 sns.kdeplot(bootstrapped_behav_orig, color="grey", ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
 sns.kdeplot(bootstrapped_behav_realigned, color=BEHAV_COLOR, ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
 
-# ax.set_xlabel("Steepness (k)")
-# ax.set_xticks([-5, 0])
-# ax.set_xlim(-5.5, 0.5)
-# ax.set_yticks([0, 1])
+ax.set_xlabel("Pearson r")
+ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+ax.set_xlim(-1, 1)
 sns.despine(ax=ax, offset=5)
 
 save_figure_atomic(fig, FIGSFOLDER / "fig3_realigned_bootstrap_kde_behaviour")
@@ -352,10 +378,9 @@ fig, ax = plt.subplots(figsize=(2.3, 2.1),
 sns.kdeplot(bootstrapped_da_orig, color="grey", ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
 sns.kdeplot(bootstrapped_da_realigned, color=DA_COLOR, ax=ax, cut=0, fill=True, bw_adjust=BANDWIDTH)
 
-# ax.set_xlabel("Steepness (k)")
-# ax.set_xticks([-5, 0])
-# ax.set_xlim(-5.5, 0.5)
-# ax.set_yticks([0, 1])
+ax.set_xlabel("Pearson r")
+ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+ax.set_xlim(-1, 1)
 sns.despine(ax=ax, offset=5)
 
 save_figure_atomic(fig, FIGSFOLDER / "fig3_realigned_bootstrap_kde_dopamine")

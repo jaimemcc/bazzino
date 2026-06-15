@@ -58,6 +58,33 @@ def get_bootstrapped_distribution_using_slopes(df, trial_col, value_col, n_boots
     
     return np.array(bootstrapped_slopes)[np.isfinite(bootstrapped_slopes)]  # also removes inf
 
+def get_bootstrapped_distribution_using_r(df, trial_col, value_col, n_bootstraps=1000, random_seed=42):
+
+    rng = np.random.default_rng(random_seed)
+    rats = np.asarray(df.id.unique())
+
+    random_lists = [rng.choice(rats, size=len(rats), replace=True) for _ in range(n_bootstraps)]
+    bootstrapped_r = []
+
+    for i, random_list in enumerate(random_lists, 1):
+        subset_bootstrapped = []
+        for rat in random_list:
+            rat_trials = df[df.id == rat]
+            subset_bootstrapped.append(rat_trials)
+
+        boot_df = pd.concat(subset_bootstrapped)
+
+        xvals = boot_df[trial_col]
+        yvals = boot_df[value_col]
+        slope, intercept, r, p, std_err = stats.linregress(xvals, yvals)
+
+        r = r if np.all(np.isfinite(r)) else np.nan
+        bootstrapped_r.append(r)
+
+    print(f"Number of NaNs in bootstrapped distribution: {np.isnan(bootstrapped_r).sum()}")
+
+    return np.array(bootstrapped_r)[np.isfinite(bootstrapped_r)]  # also removes inf
+
 def filter_complete_trials(df, trial_col, nrats=None):
     trial_counts = df.groupby([trial_col]).size().reset_index(name='count')
     if nrats is None:
