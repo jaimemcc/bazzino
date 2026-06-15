@@ -983,7 +983,12 @@ def make_euclidean_distance_heatmap_all_rats(distances, group_boundaries, cmap="
     return fig, ax
 
 
-def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Oranges"):
+def make_euclidean_distance_heatmap_averaged(
+    group_distance_matrix,
+    cmap="Oranges",
+    remove_redundant_labels=False,
+    keep_triangle="upper",
+):
     
     # Group-averaged heatmap with separate colorbar
     fig, ax = plt.subplots(figsize=(1.8, 1.8))
@@ -991,16 +996,47 @@ def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Orange
                                      gridspec_kw={"right": 0.4})
     cmap = plt.get_cmap(cmap).reversed()
 
+    if keep_triangle not in {"upper", "lower"}:
+        raise ValueError("keep_triangle must be 'upper' or 'lower'")
+
+    matrix_values = np.asarray(group_distance_matrix, dtype=float)
+    annot_labels = np.empty_like(matrix_values, dtype=object)
+    for i in range(matrix_values.shape[0]):
+        for j in range(matrix_values.shape[1]):
+            if remove_redundant_labels and i != j:
+                if keep_triangle == "upper" and i > j:
+                    annot_labels[i, j] = ""
+                    continue
+                if keep_triangle == "lower" and i < j:
+                    annot_labels[i, j] = ""
+                    continue
+            s = f"{matrix_values[i, j]:.1f}"
+            if s.startswith("-0"):
+                s = "-" + s[2:]
+            elif s.startswith("0"):
+                s = s[1:]
+            annot_labels[i, j] = s
+
     sns.heatmap(
         group_distance_matrix,
         ax=ax,
         cmap=cmap,
-        annot=False,
-        fmt=".2f",
+        annot=annot_labels,
+        fmt="",
+        annot_kws={"fontsize": 8},
         cbar_ax=ax_cbar,
         linewidths=1,
         linecolor="white",
     )
+
+    # Use rendered tile colors (not raw values) so contrast remains correct
+    # even when colormaps are reversed.
+    facecolors = ax.collections[0].get_facecolors()
+    for text, rgba in zip(ax.texts, facecolors):
+        r, g, b = rgba[:3]
+        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        text.set_color("white" if luminance < 0.5 else "black")
+
     ax.set_yticks([])
     ax.set_xticks([])
     ax_cbar.tick_params(length=0)
@@ -1008,6 +1044,66 @@ def make_euclidean_distance_heatmap_averaged(group_distance_matrix, cmap="Orange
     
     return fig, ax, fig_cbar, ax_cbar
 
+def make_confusion_matrix(
+    confusion_matrix,
+    cmap="Oranges",
+    remove_redundant_labels=False,
+    keep_triangle="upper",
+):
+    
+    # Group-averaged heatmap with separate colorbar
+    fig, ax = plt.subplots(figsize=(1.8, 1.8))
+    fig_cbar, ax_cbar = plt.subplots(figsize=(0.35, 1.8),
+                                     gridspec_kw={"right": 0.4})
+    # cmap = plt.get_cmap(cmap).reversed()
+
+    if keep_triangle not in {"upper", "lower"}:
+        raise ValueError("keep_triangle must be 'upper' or 'lower'")
+
+    cm_values = np.asarray(confusion_matrix, dtype=float)
+    annot_labels = np.empty_like(cm_values, dtype=object)
+    for i in range(cm_values.shape[0]):
+        for j in range(cm_values.shape[1]):
+            if remove_redundant_labels and i != j:
+                if keep_triangle == "upper" and i > j:
+                    annot_labels[i, j] = ""
+                    continue
+                if keep_triangle == "lower" and i < j:
+                    annot_labels[i, j] = ""
+                    continue
+            s = f"{cm_values[i, j]:.1f}"
+            if s.startswith("-0"):
+                s = "-" + s[2:]
+            elif s.startswith("0"):
+                s = s[1:]
+            annot_labels[i, j] = s
+
+    sns.heatmap(
+        cm_values,
+        ax=ax,
+        cmap=cmap,
+        annot=annot_labels,
+        fmt="",
+        annot_kws={"fontsize": 8},
+        cbar_ax=ax_cbar,
+        linewidths=1,
+        linecolor="white",
+    )
+
+    # Use rendered tile colors (not raw values) so contrast remains correct
+    # even when colormaps are reversed.
+    facecolors = ax.collections[0].get_facecolors()
+    for text, rgba in zip(ax.texts, facecolors):
+        r, g, b = rgba[:3]
+        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        text.set_color("white" if luminance < 0.5 else "black")
+
+    ax.set_yticks([])
+    ax.set_xticks([])
+    ax_cbar.tick_params(length=0)
+    # ax_cbar.set_yticks([])
+    
+    return fig, ax, fig_cbar, ax_cbar
 
 def make_mds_plot(coords, group_to_row_indices, reverse_axes=None):
     fig, ax = plt.subplots(figsize=(1.8, 1.8),

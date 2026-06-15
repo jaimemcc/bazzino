@@ -37,17 +37,30 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import seaborn as sns
 import dill
+
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 from scipy.spatial.distance import cdist
+
 from sklearn.manifold import MDS
+from sklearn.metrics import (
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    classification_report,
+    accuracy_score
+)
+
 from trompy import zscore, save_figure_atomic
 from extract_behav_parameters import smooth_array
 
-from distance_matrix import (make_metric_matrix, get_group_matrix_diffs,
-                             GROUP_ORDER, GROUP_LABELS,
-                             compute_mds_coordinates
-)
+from distance_matrix import (
+    make_metric_matrix, get_group_matrix_diffs,
+    GROUP_ORDER, GROUP_LABELS,
+    compute_mds_coordinates,
+    prepare_metric_classification_data,
+    classify_groups_from_metric,
+    evaluate_group_classifier_leave_one_rat_out,
+ )
 
 from figure_config import (
     configure_matplotlib, COLORS, HEATMAP_CMAP_DIV,
@@ -563,7 +576,13 @@ fig, ax = make_euclidean_distance_heatmap_all_rats(distances, group_boundaries=g
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig1_heatmap_euclidean_all_rats", FIGSFOLDER)
     
-fig, ax, fig_cbar, ax_cbar = make_euclidean_distance_heatmap_averaged(group_distance_matrix)
+# Toggle redundant annotation labels on/off for symmetric matrix plots.
+# keep_triangle options: "upper" or "lower"
+fig, ax, fig_cbar, ax_cbar = make_euclidean_distance_heatmap_averaged(
+    group_distance_matrix,
+    remove_redundant_labels=True,
+    keep_triangle="upper",
+ )
 ax_cbar.set_ylim([4,7])
 
 if SAVE_FIGS:
@@ -578,6 +597,44 @@ fig, ax = make_mds_plot(coords, group_to_row_indices, reverse_axes="x")
 
 if SAVE_FIGS:
     save_figure_atomic(fig, "fig1_mds_plot", FIGSFOLDER)
+
+# %%
+# use classifier to predict group labels from behaviour data and make confusion matrix
+
+metric_col = "simba_median_balance"
+results = classify_groups_from_metric(
+    x_array=x_array,
+    metric_col=metric_col,
+    group_order=GROUP_ORDER,
+    group_labels=GROUP_LABELS,
+    smooth_features=False,
+    expected_n_trials=49,
+    normalize="true",
+)
+
+X = results["X"]
+y = results["y"]
+rat_groups = results["rat_groups"]
+metric_matrix_df = results["metric_matrix_df"]
+
+print("Feature matrix shape (n_samples, n_trials):", X.shape)
+print("Unique class labels:", np.unique(y))
+print("Unique rats:", len(np.unique(rat_groups)))
+print(f"Leave-One-Rat-Out CV accuracy: {results['accuracy']:.3f}")
+print(results["report_text"])
+
+# Toggle redundant annotation labels on/off for symmetric matrix plots.
+# keep_triangle options: "upper" or "lower"
+fig, ax, fig_cbar, ax_cbar = make_confusion_matrix(
+    cm,
+    remove_redundant_labels=True,
+    keep_triangle="upper",
+)
+save_figure_atomic(fig, "fig1_confusion_matrix", FIGSFOLDER)
+
+ax_cbar.set_yticks([])
+save_figure_atomic(fig_cbar, "fig1_confusion_matrix_cbar", FIGSFOLDER)
+
 
 # %%
 ### Figure 1 legend swatches (pie-style legend exports)
