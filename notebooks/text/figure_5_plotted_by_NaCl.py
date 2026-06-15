@@ -197,13 +197,51 @@ ax[0].set_ylabel("Dopamine (AUC)")
 save_figure_atomic(f, "fig5_nacl_da", FIGSFOLDER)
 
 # %%
-# do stats on data as a function of trial first
-# so anova with trial and condition as factors, then do regression of behavior vs da per trial
+# first testing behavioural data with anova (function of trial)
 
+beh_df = (
+    x_array
+    .query('condition == "deplete" and infusiontype in ["10NaCl", "45NaCl"]')
+    [["id", "infusiontype", "trial", "simba_median_balance"]]
+    .dropna()
+    .groupby([ "id", "infusiontype", "trial"], as_index=False)["simba_median_balance"]
+    .mean()
+)
 
+beh_anova = pg.mixed_anova(
+    data=beh_df,
+    dv="simba_median_balance",
+    within="trial",
+    between="infusiontype",
+    subject="id",
+)
+
+display(beh_anova)
 
 # %%
-## ignore below this cell!
+# next testing dopamine data with anova (function of trial)
+
+beh_df = (
+    x_array
+    .query('condition == "deplete" and infusiontype in ["10NaCl", "45NaCl"]')
+    [["id", "infusiontype", "trial", "auc_snips"]]
+    .dropna()
+    .groupby([ "id", "infusiontype", "trial"], as_index=False)["auc_snips"]
+    .mean()
+)
+
+beh_anova = pg.mixed_anova(
+    data=beh_df,
+    dv="auc_snips",
+    within="trial",
+    between="infusiontype",
+    subject="id",
+)
+
+display(beh_anova)
+
+# %%
+x_array.columns
 
 # %%
 import numpy as np
