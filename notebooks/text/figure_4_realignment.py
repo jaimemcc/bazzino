@@ -169,6 +169,9 @@ fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_da, REALI
 ax[0].axvline(17+OFFSET, color="gray", linestyle="--", alpha=0.5)
 ax[1].axvline(OFFSET, color="gray", linestyle="--", alpha=0.5)
 
+for axis in ax:
+    axis.set_ylim([-0.5, 1])
+
 save_figure_atomic(fig, "fig4_realignment_behaviour", FIGSFOLDER)
 
 # realigning da to behav
@@ -183,6 +186,8 @@ fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_behav, RE
 
 ax[0].axvline(18+OFFSET, color="gray", linestyle=":", alpha=0.5)
 ax[1].axvline(OFFSET, color="gray", linestyle=":", alpha=0.5)
+
+print(ax[1].get_ylim())
 save_figure_atomic(fig, "fig4_realignment_da", FIGSFOLDER)
 
 
@@ -218,6 +223,7 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_behav, DA_COLUMN,
 ax.set_ylabel("Dopamine AUC")
 # ax.set_xticks([-5, 0, 5], ["-8", "-3", "2"])
 ax.axvline(0, color="gray", linestyle=":", alpha=0.5)
+ax.set_ylim([np.float64(-8.289015319171442), np.float64(15.032973623363642)])
 
 save_figure_atomic(f, "fig4_realignment_slope_da", FIGSFOLDER)
 
@@ -250,14 +256,14 @@ BASE_BOOTSTRAP_SEED = 42
 df_orig_for_slope = data_for_figure_to_da["df_orig_for_slope"]
 df_reali_for_slope = data_for_figure_to_da["df_reali_for_slope"]
 
-bootstrapped_behav_orig = get_bootstrapped_distribution_using_r(
+bootstrapped_behav_orig = get_bootstrapped_distribution_using_slopes(
     df_orig_for_slope,
     "trial",
     SIMBA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 0,
 )
-bootstrapped_behav_realigned = get_bootstrapped_distribution_using_r(
+bootstrapped_behav_realigned = get_bootstrapped_distribution_using_slopes(
     df_reali_for_slope,
     REALIGNMENT_COLUMN_TO_DA,
     SIMBA_COLUMN,
@@ -268,14 +274,14 @@ bootstrapped_behav_realigned = get_bootstrapped_distribution_using_r(
 df_orig_for_slope = data_for_figure_to_behav["df_orig_for_slope"]
 df_reali_for_slope = data_for_figure_to_behav["df_reali_for_slope"]
 
-bootstrapped_da_orig = get_bootstrapped_distribution_using_r(
+bootstrapped_da_orig = get_bootstrapped_distribution_using_slopes(
     df_orig_for_slope,
     "trial",
     DA_COLUMN,
     n_bootstraps=N_BOOTSTRAPS,
     random_seed=BASE_BOOTSTRAP_SEED + 2,
 )
-bootstrapped_da_realigned = get_bootstrapped_distribution_using_r(
+bootstrapped_da_realigned = get_bootstrapped_distribution_using_slopes(
     df_reali_for_slope,
     REALIGNMENT_COLUMN_TO_BEHAV,
     DA_COLUMN,
@@ -287,16 +293,16 @@ bootstrapped_da_realigned = get_bootstrapped_distribution_using_r(
 from figure_plotting import make_bootstrap_boxplot
 
 f, ax = make_bootstrap_boxplot([bootstrapped_behav_orig, bootstrapped_behav_realigned], BEHAV_COLOR)
-ax.set_ylabel("Pearson r")
-ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-ax.set_ylim(-0.8, 0.5)
+ax.set_ylabel("Slope")
+ax.set_yticks([-0.1, 0, 0.1])
+# ax.set_ylim(-0.8, 0.5)
 
 save_figure_atomic(f, "fig4_realignment_bootstrap_behaviour", FIGSFOLDER)
 
 f, ax = make_bootstrap_boxplot([bootstrapped_da_orig, bootstrapped_da_realigned], DA_COLOR)
-ax.set_ylabel("Pearson r")
-ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-ax.set_ylim(-0.8, 0.5)
+ax.set_ylabel("Slope")
+ax.set_yticks([-2,-1, 0])
+# ax.set_ylim(-0.8, 0.5)
 
 save_figure_atomic(f, "fig4_realignment_bootstrap_da", FIGSFOLDER)
 
