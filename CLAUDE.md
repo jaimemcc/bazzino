@@ -1,1 +1,0 @@
-C:/Users/jmc010/Dropbox/Obsidian/claude/global-preferences.md
