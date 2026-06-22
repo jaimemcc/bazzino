@@ -166,8 +166,8 @@ data_for_figure_to_da = prepare_shared_data(subset_aligned_to_da, REALIGNMENT_CO
 fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_da, REALIGNMENT_COLUMN_TO_DA, SIMBA_COLUMN, "behav",
                                           color=BEHAV_COLOR, do_not_plot_sigmoid=True)
 
-ax[0].axvline(17+OFFSET, color="gray", linestyle="--", alpha=0.5)
-ax[1].axvline(OFFSET, color="gray", linestyle="--", alpha=0.5)
+ax[0].axvline(17, color="gray", linestyle="--", alpha=0.5)
+ax[1].axvline(0, color="gray", linestyle="--", alpha=0.5)
 
 for axis in ax:
     axis.set_ylim([-0.5, 1])
@@ -184,8 +184,8 @@ data_for_figure_to_behav = prepare_shared_data(subset_aligned_to_behav, REALIGNM
 fig, ax = make_realignment_panel_only_one_parameter(data_for_figure_to_behav, REALIGNMENT_COLUMN_TO_BEHAV, DA_COLUMN, "da",
                                           color=DA_COLOR, do_not_plot_sigmoid=True)
 
-ax[0].axvline(18+OFFSET, color="gray", linestyle=":", alpha=0.5)
-ax[1].axvline(OFFSET, color="gray", linestyle=":", alpha=0.5)
+ax[0].axvline(18, color="gray", linestyle=":", alpha=0.5)
+ax[1].axvline(0, color="gray", linestyle=":", alpha=0.5)
 
 print(ax[1].get_ylim())
 save_figure_atomic(fig, "fig4_realignment_da", FIGSFOLDER)
@@ -199,7 +199,8 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_da, SIMBA_COLUMN,
 
 ax.set_yticks([ -0.5, 0, 0.5, 1])
 ax.set_ylabel("App. behaviour")
-ax.axvline(0, color="gray", linestyle="--", alpha=0.5)
+ax.set_xticks([-5, 0, 5], ["-2", "+3", "+8"])
+ax.axvline(-3, color="gray", linestyle="--", alpha=0.5)
 
 save_figure_atomic(f, "fig4_realignment_slope_behav", FIGSFOLDER)
 
@@ -221,8 +222,8 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_behav, DA_COLUMN,
 
 # ax.set_yticks([-0.5, 0, 0.5, 1])
 ax.set_ylabel("Dopamine AUC")
-# ax.set_xticks([-5, 0, 5], ["-8", "-3", "2"])
-ax.axvline(0, color="gray", linestyle=":", alpha=0.5)
+ax.set_xticks([-5, 0, 5], ["-8", "-3", "+2"])
+ax.axvline(3, color="gray", linestyle=":", alpha=0.5)
 ax.set_ylim([np.float64(-8.289015319171442), np.float64(15.032973623363642)])
 
 save_figure_atomic(f, "fig4_realignment_slope_da", FIGSFOLDER)
@@ -361,6 +362,30 @@ delta_behav = paired_bootstrap_diff_stats(
     label="Behavior",
     alternative="less",
 )
+
+print(f"Paired bootstrap-difference test revealed behavior slopes were marginally smaller "
+      f"in realigned versus original data (Δ = −0.055, 95% CI [−0.122, 0.005], p = 0.039, "
+      f"n = 1000 bootstrap resamples)")
+
+# %%
+from scipy.stats import ttest_ind, ttest_1samp, ttest_rel
+# Dopamine vs 0
+ttest_1samp(bootstrapped_da_realigned, 0)
+
+print(f"Behaviour (orig vs realigned): {ttest_ind(bootstrapped_behav_orig, bootstrapped_behav_realigned)}")
+print(f"Dopamine (orig vs realigned): {ttest_ind(bootstrapped_da_orig, bootstrapped_da_realigned)}")
+
+
+# %%
+from scipy.stats import mannwhitneyu
+stat, p = mannwhitneyu(bootstrapped_behav_orig, bootstrapped_behav_realigned)
+print(f"Mann-Whitney U: U={stat:.1f}, p={p:.4f}")
+
+ci_orig = np.percentile(bootstrapped_behav_orig, [2.5, 97.5])
+ci_real = np.percentile(bootstrapped_behav_realigned, [2.5, 97.5])
+print(f"Original: 95% CI = [{ci_orig[0]:.4f}, {ci_orig[1]:.4f}]")
+print(f"Realigned: 95% CI = [{ci_real[0]:.4f}, {ci_real[1]:.4f}]")
+# If CIs don't overlap → distributions differ
 
 # %%
 BANDWIDTH=1

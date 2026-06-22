@@ -1317,7 +1317,7 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
 
     plot_auc_and_sigmoid(df_orig, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color,
                          do_not_plot_sigmoid=do_not_plot_sigmoid)
-    ax[0].set_xlabel("Trial", fontsize=10)
+    ax[0].set_xlabel("Trial-aligned", fontsize=10)
     ax[0].set_ylabel(ylabel, fontsize=10)
 
     ax[0].tick_params(axis='y')
@@ -1328,8 +1328,8 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
     
     plot_auc_and_sigmoid(df_realigned, trial_col, column_to_plot, ax=ax[1], include_steepness=False, color=color,
                          do_not_plot_sigmoid=do_not_plot_sigmoid, markerfacecolor=color)
-    ax[1].set_xlabel("Trial (realigned)", fontsize=10)
-    ax[1].set_xticks([-10, 0, 10, 20])
+    ax[1].set_xlabel("Transition-aligned", fontsize=10)
+    # ax[1].set_xticks([-10, 0, 10, 20])
 
     ax[1].tick_params(axis='y')
     if not do_not_plot_sigmoid:
