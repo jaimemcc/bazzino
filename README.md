@@ -1,5 +1,6 @@
 # bazzino
-Analysis of data in sodium appetite experiment by Bazzino and Roitman
+Analysis of data in sodium appetite experiment by Bazzino et al. Preprint available at:
+https://www.biorxiv.org/content/10.64898/2026.07.16.738888v1
 
 ## Data processing
 The analysis uses photometry data and head position/movement data.
