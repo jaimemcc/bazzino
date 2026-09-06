@@ -47,7 +47,7 @@ df_shap_raw = (
 
 # %%
 df_shap.shape
-    
+
 
 # %%
 df_shap.query("Appetitive == 1").mean().sort_values(ascending=False)
