@@ -66,6 +66,9 @@ class ExtractFeaturesFrom5bps(ConfigReader,
             save_path = os.path.join(self.features_dir, f'{video_name}.{self.file_type}')
 
             print("Calculating euclidean distances...")
+            # Base pose / geometry features. Larger values mean a larger distance
+            # between landmarks in a single frame (for example, a more stretched
+            # posture or a more spatially extended body shape).
             self.out_data["Mouse_nose_to_tail"] = self.euclidean_distance(
                 self.in_data["Nose_x"].values,
                 self.in_data["Tail_base_x"].values,
@@ -88,6 +91,8 @@ class ExtractFeaturesFrom5bps(ConfigReader,
                 self.in_data["Ear_right_y"].values,
                 self.px_per_mm,
             )
+            # Frame-to-frame movement features. Larger values mean the landmark moved
+            # farther between the previous and current frame.
             self.out_data["Movement_mouse_nose"] = self.euclidean_distance(
                 self.in_data["Nose_x_shifted"].values,
                 self.in_data["Nose_x"].values,
@@ -126,6 +131,10 @@ class ExtractFeaturesFrom5bps(ConfigReader,
 
 
             print("Calculating hull variables...")
+            # Hull-based geometry features. These summarize the spread of the body
+            # using pairwise distances between all body points in the frame.
+            # Larger values mean a broader / more stretched body configuration,
+            # not necessarily more movement.
             mouse_array = self.in_data[self.mouse_headers].to_numpy()
             self.hull_dict = defaultdict(list)
             for cnt, animal_frm in enumerate(mouse_array):
@@ -163,6 +172,10 @@ class ExtractFeaturesFrom5bps(ConfigReader,
             )
 
             print("Calculating rolling windows: medians, medians, and sums...")
+            # Rolling-window features. These smooth the underlying movement or geometry
+            # signal over a short temporal window. Mean/median describe the typical
+            # level over the window, while sum reflects accumulated signal over the
+            # window and is more sensitive to sustained motion or sustained spread.
 
             for window in self.roll_windows_values:
                 col_name = "Mouse1_mean_euclid_distances_median_{}".format(str(window))
@@ -310,6 +323,9 @@ class ExtractFeaturesFrom5bps(ConfigReader,
                 )
 
             print("Calculating deviations...")
+            # Deviation features. These are not raw movement values; they encode how
+            # far a value is from its own average. Positive values mean above-average
+            # for that feature; negative values mean below-average.
             self.out_data["Total_movement_all_bodyparts_deviation"] = (
                 self.out_data["Total_movement_all_bodyparts_M1"].mean()
                 - self.out_data["Total_movement_all_bodyparts_M1"]
@@ -358,6 +374,12 @@ class ExtractFeaturesFrom5bps(ConfigReader,
             '''
 
             print("Calculating percentile ranks...")
+            # Percentile-rank / relative-position features. For the true percentile
+            # rank columns, higher values mean the frame sits higher in the overall
+            # distribution of that feature. For the rolling-window columns currently
+            # created here, the implementation actually stores a centered deviation
+            # from the mean and labels it with _percentile_rank; interpret those as
+            # relative-to-average features rather than direct movement intensity.
             # List of body parts to process
             body_parts = ["mouse_nose", "mouse_head_base"]
             # Loop through each body part and calculate percentile rank
