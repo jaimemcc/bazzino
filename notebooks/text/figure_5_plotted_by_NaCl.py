@@ -490,3 +490,55 @@ print(f"n rows after trimming: {len(beh_trim_df)}")
 print(f"n subjects after trimming: {beh_trim_df['id'].nunique()}")
 
 # %%
+da_trim_df
+
+
+# %%
+def make_auc_and_sem_data_per_trial_for_trimmed_arrays(trimmed_df, infusiontype, y_col):
+    
+    grouped = (
+        trimmed_df
+        .query("infusiontype == @infusiontype")
+        .groupby("trial")[y_col]
+    )
+    
+    auc_data = (grouped.mean().values)
+    sem_data = (grouped.sem().values)
+
+    return auc_data, sem_data
+
+
+deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial_for_trimmed_arrays(da_trim_df, "10NaCl", "auc_snips")
+deplete_450_mean, deplete_450_sem = make_auc_and_sem_data_per_trial_for_trimmed_arrays(da_trim_df, "45NaCl", "auc_snips")
+
+
+# %%
+
+# get xvals for diff infusion volumes
+scaling_factor_100mM = 2.3376
+scaling_factor_450mM = 2.3376 * 4.5
+
+x_vals_100 = np.arange(0,36)*scaling_factor_100mM
+x_vals_450 = np.arange(0,36)*scaling_factor_450mM
+
+# %%
+# supplemental figure showing dopamine with first x mg of NaCl removed
+
+f, ax = plt.subplots(ncols=1, figsize=(3, 2))
+
+
+
+ax.errorbar(x_vals_100, deplete_100_mean, yerr=deplete_100_sem, color=colors[2], alpha=0.5, marker="o")
+
+x_vals_450_red, deplete_450_red, deplete_450_sem_red = zip(*[(x, y, err) for x, y, err in zip(x_vals_450, deplete_450_mean, deplete_450_sem) if x <= np.max(x_vals_100)])
+
+
+ax.errorbar(x_vals_450_red, deplete_450_red, yerr=deplete_450_sem_red, color=colors[3], alpha=0.7, marker="o")
+
+ax.set_xlabel("NaCl (mg)")
+ax.set_ylabel("Dopamine AUC")
+
+sns.despine(ax=ax, offset=5)
+ax.axhline(0, color="k", linestyle="--",alpha=0.3, zorder=-10)
+
+# %%

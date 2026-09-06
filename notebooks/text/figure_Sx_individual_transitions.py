@@ -6,7 +6,72 @@
 #       format_name: percent
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
+#   kernelspec:
+#     display_name: default
+#     language: python
+#     name: python3
 # ---
+
+# %%
+
+# %%
+# %load_ext autoreload
+# %autoreload 2
+
+from pathlib import Path
+import sys
+
+# Register dill/pathlib compatibility shim BEFORE importing dill
+sys.path.insert(0, str(Path("../src").resolve()))
+from pickle_compat import enable_dill_pathlib_compat
+enable_dill_pathlib_compat()
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import dill
+
+from matplotlib.colors import to_hex
+
+from trompy import save_figure_atomic
+
+from figure_config import (
+    configure_matplotlib, COLORS, HEATMAP_CMAP_DIV,
+    DATAFOLDER, RESULTSFOLDER, FIGSFOLDER,
+    SAVE_FIGS
+)
+
+# from utils import make_realigned_trials
+from realignment_helpers import get_realigned_data
+
+SAVE_FIGS = True
+
+# Configure matplotlib
+configure_matplotlib()
+colors = COLORS  # Use shared color palette
+custom_cmap = HEATMAP_CMAP_DIV  # Use shared colormap
+
+# 11 evenly spaced colors from custom_cmap
+sampled_hex = [to_hex(custom_cmap(x)) for x in np.linspace(0, 1, 11)]
+DA_COLOR = sampled_hex[0]  # Choose the 3rd color for DA
+BEHAV_COLOR = sampled_hex[-1]  # Choose the 6th color for behavior
+
+# %%
+assembled_data_path = DATAFOLDER / "assembled_data.pickle"
+
+with open(assembled_data_path, "rb") as f:
+    data = dill.load(f)
+
+# Extract main components
+x_array = data["x_array"].copy()
+
+# reverses cluster assignments
+x_array["cluster_photo"] = x_array["cluster_photo"].map({0: 1, 1: 0})
+
+print(f"Loaded assembled data from {assembled_data_path}")
+print(f"\nData structure:")
+print(f"  - x_array shape: {x_array.shape}")
 
 # %%
 # additional analysis for revision
@@ -100,3 +165,5 @@ for axis in [ax1, ax2]:
 
 
 
+
+# %%
