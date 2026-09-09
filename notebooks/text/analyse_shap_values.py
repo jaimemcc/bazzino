@@ -14,7 +14,12 @@
 
 # %%
 from pathlib import Path
+import re
+import numpy as np
 import pandas as pd
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # %%
 DATAFOLDER = Path("../data/shap_values")
@@ -53,7 +58,6 @@ df_shap.shape
 df_shap.query("Appetitive == 1").mean().sort_values(ascending=False)
 
 # %%
-import matplotlib.pyplot as plt
 
 summary = (
     df_shap.query("Appetitive == 1")
@@ -75,25 +79,25 @@ plt.show()
 
 summary.head(15)
 
-# %%
-import re
-import matplotlib.pyplot as plt
 
-# Group features by semantic family based on the naming conventions from the feature extractor
+# %%
+# Group features into movement, body/hull geometry, or other.
 
 def assign_group(col: str) -> str:
-    if re.search(r"^(Mouse_nose_to_tail|Mouse_head_to_tail|Mouse_Ear_distance)$", col):
-        return "body_geometry"
-    if re.search(r"^Movement_mouse_(nose|tail_base|left_ear|right_ear|head_base)$", col):
-        return "body_part_movement"
-    if re.search(r"^(Total_movement_all_bodyparts_M1|Total_movement_M1_)", col):
-        return "aggregate_movement"
-    if re.search(r"^(M1_|Mouse1_(smallest|largest|mean)_euclid_distances_)", col):
-        return "hull_geometry"
-    if re.search(r"^(Tail_base_movement_M1_|Head_base_movement_M1_|Nose_movement_M1_)", col):
-        return "rolling_window_summary"
-    if re.search(r"(_deviation|_percentile_rank)$", col):
-        return "derived_scores"
+    if re.search(
+        r"^(Movement_mouse_(nose|tail_base|left_ear|right_ear|head_base)|"
+        r"Total_movement_all_bodyparts_M1|Total_movement_M1_|"
+        r"Tail_base_movement_M1_|Head_base_movement_M1_|Nose_movement_M1_)"
+        r"|(_deviation|_percentile_rank)$",
+        col,
+    ):
+        return "movement"
+    if re.search(
+        r"^(Mouse_nose_to_tail|Mouse_head_to_tail|Mouse_Ear_distance|"
+        r"M1_|Mouse1_(smallest|largest|mean)_euclid_distances_)",
+        col,
+    ):
+        return "body_hull_geometry"
     return "other"
 
 feature_groups = pd.DataFrame({
@@ -102,6 +106,150 @@ feature_groups = pd.DataFrame({
 })
 feature_groups["group"] = feature_groups["feature"].apply(assign_group)
 
+# %%
+cumul_summary
+
+# %%
+# Plot all features with cumulative SHAP importance on x and feature rows on y.
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
+
+def assign_bodypart(feature: str) -> str:
+    feature_lower = feature.lower()
+    if "all_bodyparts" in feature_lower:
+        return "all body parts"
+    for key, label in [
+        ("nose", "nose"),
+        ("tail_base", "tail base"),
+        ("head_base", "head base"),
+        ("left_ear", "left ear"),
+        ("ear_left", "left ear"),
+        ("right_ear", "right ear"),
+        ("ear_right", "right ear"),
+    ]:
+        if key in feature_lower:
+            return label
+    if feature_lower.startswith(("mouse_", "mouse1_")) or "total" in feature_lower:
+        return "whole mouse"
+    print(f"Feature: {feature}, no body part assigned")
+    return "other"
+
+def get_time_window(feature: str):
+    match = re.search(r"_(\d+(?:\.\d+)?)$", feature)
+    return match.group(1) if match else "none"
+
+cumul_summary = (
+    feature_groups
+    .assign(cumulative_importance=lambda x: x.importance.cumsum() / np.sum(x.importance))
+)
+cumul_summary["bodypart"] = cumul_summary["feature"].apply(assign_bodypart)
+cumul_summary["time_window"] = cumul_summary["feature"].apply(get_time_window)
+
+bodypart_colors = {
+    "nose": "#d95f02",
+    "tail base": "#1b9e77",
+    "head base": "#7570b3",
+    "left ear": "#e7298a",
+    "right ear": "#66a61e",
+    "all body parts": "#e6ab02",
+    "whole mouse": "#a6761d",
+    "other": "#bdbdbd",
+}
+bodypart_codes = {name: code for code, name in enumerate(bodypart_colors)}
+bodypart_values = cumul_summary["bodypart"].map(bodypart_codes).to_numpy()
+
+window_order = ["none", "2", "5", "6", "7.5", "10"]
+window_colors = ["#d9d9d9", "#440154", "#31688e", "#35b779", "#90d743", "#fde725"]
+window_codes = {name: code for code, name in enumerate(window_order)}
+window_values = cumul_summary["time_window"].map(window_codes).to_numpy()
+
+f, [ax1, ax_window, ax2] = plt.subplots(
+    figsize=(5.5, 6),
+    ncols=3,
+    sharey=True,
+    gridspec_kw={"width_ratios": [0.05, 0.05, 1], "wspace": 0.08},
+)
+
+# One-column heatmaps: one colored cell for each feature row.
+ax1.imshow(
+    bodypart_values[:, None],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(list(bodypart_colors.values())),
+    vmin=-0.5,
+    vmax=len(bodypart_colors) - 0.5,
+)
+ax_window.imshow(
+    window_values[:, None],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(window_colors),
+    vmin=-0.5,
+    vmax=len(window_order) - 0.5,
+)
+
+for axis in [ax1, ax_window]:
+    axis.set_xticks([])
+    axis.set_yticks([])
+    axis.set_xlim(-0.5, 0.5)
+    axis.set_ylim(len(cumul_summary) - 0.5, -0.5)
+
+ax1.set_title("Body\npart", fontsize=8)
+ax_window.set_title("Time\nwindow", fontsize=8)
+
+for ytick, row in enumerate(cumul_summary.itertuples(index=False)):
+    group = str(row.group)
+    if "movement" in group:
+        color = "red"
+    elif "body_hull_geometry" in group:
+        color = "blue"
+    else:
+        color = "grey"
+    ax2.scatter(
+        row.cumulative_importance,
+        ytick,
+        edgecolors=color,
+        facecolors="w",
+        alpha=0.5,
+        s=30,
+    )
+
+ax2.set_xlabel("Cumulative absolute SHAP importance")
+
+bodypart_legend = [
+    Patch(color=color, label=label)
+    for label, color in bodypart_colors.items()
+]
+bodypart_legend_artist = ax2.legend(
+    handles=bodypart_legend,
+    loc="upper right",
+    bbox_to_anchor=(1, 1),
+    frameon=False,
+    fontsize=8,
+)
+
+window_legend = [
+    Patch(color=color, label=f"{window} s" if window != "none" else "none")
+    for window, color in zip(window_order, window_colors)
+]
+ax2.legend(
+    handles=window_legend,
+    loc="lower left",
+    bbox_to_anchor=(0, 0),
+    frameon=False,
+    fontsize=7,
+)
+ax2.add_artist(bodypart_legend_artist)
+
+ax1.set_ylabel("Features")
+
+sns.despine(ax=ax1, left=True, bottom=True)
+sns.despine(ax=ax_window, left=True, bottom=True)
+sns.despine(ax=ax2)
+for axis in [ax1, ax_window, ax2]:
+    axis.set_yticks([])
+
+# %%
 # Sum importance within each semantic family
 summary_by_group = (
     feature_groups.groupby("group", as_index=False)["importance"]
@@ -110,12 +258,8 @@ summary_by_group = (
 )
 
 summary_by_group["group"] = summary_by_group["group"].replace({
-    "body_geometry": "Body geometry",
-    "body_part_movement": "Body-part movement",
-    "aggregate_movement": "Aggregate movement",
-    "hull_geometry": "Hull geometry",
-    "rolling_window_summary": "Rolling-window summaries",
-    "derived_scores": "Derived scores",
+    "movement": "Movement",
+    "body_hull_geometry": "Body/hull geometry",
     "other": "Other",
 })
 
@@ -130,16 +274,15 @@ plt.tight_layout()
 plt.show()
 
 # %%
+feature_groups
+
+# %%
 # Create a readable table showing which features were grouped together
 feature_group_table = (
     feature_groups
     .assign(group_name=feature_groups["group"].replace({
-        "body_geometry": "Body geometry",
-        "body_part_movement": "Body-part movement",
-        "aggregate_movement": "Aggregate movement",
-        "hull_geometry": "Hull geometry",
-        "rolling_window_summary": "Rolling-window summaries",
-        "derived_scores": "Derived scores",
+        "movement": "Movement",
+        "body_hull_geometry": "Body/hull geometry",
         "other": "Other",
     }))
     .sort_values(["group_name", "feature"])
@@ -391,9 +534,9 @@ plt.show()
 pca_df_all.head()
 
 # %%
-# Compare rolling-window suffix importance across feature families
+# Compare rolling-window suffix importance across feature groups
 # We parse the suffix in each feature name (e.g. 2, 5, 6, 7.5, 10) and summarize
-# mean absolute SHAP importance for each window size within each feature family.
+# mean absolute SHAP importance for each feature group.
 
 subset = df_shap.query("Appetitive == 1").copy()
 
@@ -413,19 +556,18 @@ def get_window_suffix(feature: str):
 
 summary_long["window"] = summary_long["feature"].apply(get_window_suffix)
 
-# Keep only features with a rolling-window suffix and a known semantic family.
-rolling_summary = summary_long.dropna(subset=["window", "group"]).copy()
-rolling_summary = rolling_summary[rolling_summary["group"].isin(["aggregate_movement", "rolling_window_summary", "hull_geometry", "derived_scores"])]
+# Keep only features with a rolling-window suffix.
+rolling_summary = summary_long.dropna(subset=["window"]).copy()
 
-# Show the distribution of importance by suffix for each family.
-window_family_summary = (
+# Show the distribution of importance by suffix for each group.
+window_group_summary = (
     rolling_summary.groupby(["group", "window"], as_index=False)["importance"]
     .mean()
     .sort_values(["group", "window"])
 )
 
-print("Mean absolute SHAP importance by feature family and rolling-window suffix:")
-print(window_family_summary.to_string(index=False))
+print("Mean absolute SHAP importance by feature group and rolling-window suffix:")
+print(window_group_summary.to_string(index=False))
 
 # Also show the top features for each window size.
 for window in sorted(rolling_summary["window"].unique()):
@@ -437,13 +579,13 @@ for window in sorted(rolling_summary["window"].unique()):
     print(f"\nWindow {window} top features:")
     print(top_for_window[["group", "feature", "importance"]].to_string(index=False))
 
-# A simple plot: one line per family, with window size on x-axis.
+# A simple plot: one line per group, with window size on x-axis.
 plt.figure(figsize=(8, 4))
-for group_name, grp in window_family_summary.groupby("group"):
+for group_name, grp in window_group_summary.groupby("group"):
     plt.plot(grp["window"], grp["importance"], marker="o", label=group_name)
 plt.xlabel("Rolling-window suffix")
 plt.ylabel("Mean |SHAP| importance")
-plt.title("Importance of rolling-window suffixes by feature family")
+plt.title("Importance of rolling-window suffixes by feature group")
 plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
 plt.tight_layout()
 plt.show()
