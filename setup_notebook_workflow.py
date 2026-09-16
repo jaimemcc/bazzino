@@ -1083,7 +1083,7 @@ def load_workflow_state(root: Path) -> dict:
 def save_workflow_state(root: Path, state: dict) -> None:
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
     workflow_state_path(root).write_text(
-        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        json.dumps(state, indent=2, sort_keys=True) + "\\n",
         encoding="utf-8",
     )
 
