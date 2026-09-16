@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
 
 CONFIG_FILENAME = "notebook_workflow_config.json"
+STATE_FILENAME = ".notebook_workflow_state.json"
 DEFAULT_SOURCE_DIR = "notebooks"
 DEFAULT_TRACKED_SUBDIR = "text"
 
@@ -192,3 +195,53 @@ def resolve_tracked_notebook_arg(
     if len(matches) == 1:
         return matches[0]
     return None
+
+
+def workflow_state_path(root: Path) -> Path:
+    return root / STATE_FILENAME
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_workflow_state(root: Path) -> dict:
+    state_path = workflow_state_path(root)
+    if not state_path.exists():
+        return {"version": 1, "notebooks": {}}
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{STATE_FILENAME} is not valid JSON: {exc}") from exc
+    if not isinstance(state, dict) or not isinstance(state.get("notebooks", {}), dict):
+        raise ValueError(f"{STATE_FILENAME} must define a notebooks object")
+    return state
+
+
+def save_workflow_state(root: Path, state: dict) -> None:
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    workflow_state_path(root).write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "
+",
+        encoding="utf-8",
+    )
+
+
+def state_key(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def record_workflow_state(
+    state: dict,
+    *,
+    source_notebook: Path,
+    tracked_notebook: Path,
+    root: Path,
+    operation: str,
+) -> None:
+    state.setdefault("notebooks", {})[state_key(source_notebook, root)] = {
+        "source_sha256": file_digest(source_notebook),
+        "tracked_sha256": file_digest(tracked_notebook),
+        "last_operation": operation,
+        "last_updated_at": datetime.now(timezone.utc).isoformat(),
+    }

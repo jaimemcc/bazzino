@@ -190,3 +190,7 @@ notebooks/**/*.ipynb
 
 # Affinity Designer lock files
 *.afdesign~lock~
+
+
+# Notebook workflow local state
+.notebook_workflow_state.json

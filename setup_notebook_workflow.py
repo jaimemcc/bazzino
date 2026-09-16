@@ -53,6 +53,8 @@ JUPYTEXT_SECTION = [("tool.jupytext", {"formats": '"ipynb,py:percent"'})]
 
 PYPROJECT_WORKFLOW_SECTIONS = [
     ("tool.jupytext", {"formats": '"ipynb,py:percent"'}),
+    # IMPORTANT: Both win-64 and linux-64 must be present for CI and cross-platform locked installs.
+    # See PIXI_LOCKED_INSTALL_FINDINGS.md for details.
     (
         "tool.pixi.workspace",
         {
@@ -149,12 +151,18 @@ def _merge_toml_sections(existing_text: str, sections: list[tuple[str, dict[str,
                 lines.append("")
             lines.append(f"[{section_name}]")
             for key, value in entries.items():
+                # Always force platforms to both win-64 and linux-64 for workflow sections
+                if key == "platforms":
+                    value = '["win-64", "linux-64"]'
                 lines.append(f"{key} = {value}")
             changed = True
             continue
 
         section_start, section_end = section_bounds
         for key, value in entries.items():
+            # Always force platforms to both win-64 and linux-64 for workflow sections
+            if key == "platforms":
+                value = '["win-64", "linux-64"]'
             desired_line = f"{key} = {value}"
             existing_index: int | None = None
             for index in range(section_start + 1, section_end):
@@ -171,6 +179,11 @@ def _merge_toml_sections(existing_text: str, sections: list[tuple[str, dict[str,
             if lines[existing_index].strip() == desired_line:
                 continue
 
+            # Always update platforms for workflow safety, even if on_existing == 'skip'
+            if key == "platforms":
+                lines[existing_index] = desired_line
+                changed = True
+                continue
             if on_existing == "skip":
                 continue
             if on_existing == "fail":
@@ -525,6 +538,7 @@ def create_gitignore(root: Path, source_dirs: list[str], *, on_existing: str, dr
         "",
         "# Linting and formatting caches",
         ".ruff_cache/",
+        ".notebook_workflow_state.json",
         "",
         "# Pixi environments",
         ".pixi/*",
@@ -551,6 +565,7 @@ def create_gitignore(root: Path, source_dirs: list[str], *, on_existing: str, dr
             "# Notebook binaries (track .py via Jupytext instead)",
             *notebook_lines,
             ".ipynb_checkpoints/",
+            ".notebook_workflow_state.json",
         ]
         missing_lines = [line for line in required_lines if line not in existing_lines]
 
@@ -569,6 +584,8 @@ def create_gitignore(root: Path, source_dirs: list[str], *, on_existing: str, dr
                     appended_lines.append(notebook_line)
             if ".ipynb_checkpoints/" in missing_lines:
                 appended_lines.extend(["", "# Jupyter", ".ipynb_checkpoints/"])
+            if ".notebook_workflow_state.json" in missing_lines:
+                appended_lines.extend(["", "# Notebook workflow local state", ".notebook_workflow_state.json"])
 
             target.write_text("\n".join(existing_lines + appended_lines).rstrip() + "\n", encoding="utf-8")
             status = "overwritten"
@@ -846,11 +863,14 @@ def create_scripts(root: Path, *, on_existing: str, dry_run: bool) -> None:
 from __future__ import annotations
 
 import json
+import hashlib
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
 
 CONFIG_FILENAME = "notebook_workflow_config.json"
+STATE_FILENAME = ".notebook_workflow_state.json"
 DEFAULT_SOURCE_DIR = "notebooks"
 DEFAULT_TRACKED_SUBDIR = "text"
 
@@ -1037,6 +1057,55 @@ def resolve_tracked_notebook_arg(
     if len(matches) == 1:
         return matches[0]
     return None
+
+
+def workflow_state_path(root: Path) -> Path:
+    return root / STATE_FILENAME
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_workflow_state(root: Path) -> dict:
+    state_path = workflow_state_path(root)
+    if not state_path.exists():
+        return {"version": 1, "notebooks": {}}
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{STATE_FILENAME} is not valid JSON: {exc}") from exc
+    if not isinstance(state, dict) or not isinstance(state.get("notebooks", {}), dict):
+        raise ValueError(f"{STATE_FILENAME} must define a notebooks object")
+    return state
+
+
+def save_workflow_state(root: Path, state: dict) -> None:
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    workflow_state_path(root).write_text(
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def state_key(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def record_workflow_state(
+    state: dict,
+    *,
+    source_notebook: Path,
+    tracked_notebook: Path,
+    root: Path,
+    operation: str,
+) -> None:
+    state.setdefault("notebooks", {})[state_key(source_notebook, root)] = {
+        "source_sha256": file_digest(source_notebook),
+        "tracked_sha256": file_digest(tracked_notebook),
+        "last_operation": operation,
+        "last_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
 ''',
         "sync_notebooks.py": '''\
 from __future__ import annotations
@@ -1046,7 +1115,12 @@ from pathlib import Path
 import jupytext
 
 from notebook_workflow_config import collect_source_notebooks
+from notebook_workflow_config import file_digest
+from notebook_workflow_config import load_workflow_state
 from notebook_workflow_config import load_managed_roots
+from notebook_workflow_config import record_workflow_state
+from notebook_workflow_config import save_workflow_state
+from notebook_workflow_config import state_key
 from notebook_workflow_config import tracked_path_for_source
 
 
@@ -1057,7 +1131,13 @@ def read_source_notebook(source_notebook: Path):
     return jupytext.reads(source_notebook.read_text(encoding="utf-8-sig"), fmt="ipynb")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Sync source .ipynb notebooks to tracked .py files.")
+    parser.add_argument("--force", action="store_true", help="Overwrite tracked files when both sides changed.")
+    args = parser.parse_args(argv)
+
     try:
         managed_roots = load_managed_roots(ROOT)
     except ValueError as exc:
@@ -1069,12 +1149,46 @@ def main() -> int:
         print("No source notebooks found under configured managed roots.")
         return 0
 
+    try:
+        state = load_workflow_state(ROOT)
+    except ValueError as exc:
+        print(f"Notebook workflow state error: {exc}")
+        return 2
+
+    pending: list[tuple[Path, Path, str, bool]] = []
     for managed_root, source_notebook in notebooks:
         target_notebook = tracked_path_for_source(source_notebook, managed_root)
-        target_notebook.parent.mkdir(parents=True, exist_ok=True)
-
         notebook_object = read_source_notebook(source_notebook)
-        jupytext.write(notebook_object, target_notebook, fmt="py:percent")
+        regenerated_text = jupytext.writes(notebook_object, fmt="py:percent")
+        source_key = state_key(source_notebook, ROOT)
+        previous = state.get("notebooks", {}).get(source_key)
+        source_changed = not previous or previous.get("source_sha256") != file_digest(source_notebook)
+        tracked_changed = target_notebook.exists() and (
+            not previous or previous.get("tracked_sha256") != file_digest(target_notebook)
+        )
+        content_changed = target_notebook.exists() and target_notebook.read_text(encoding="utf-8") != regenerated_text
+
+        if content_changed and tracked_changed and source_changed and not args.force:
+            print(
+                f"Sync conflict for {source_notebook.relative_to(ROOT)}: both the .ipynb and .py changed "
+                f"since the last recorded sync. Resolve manually, or run 'pixi run sync-notebooks --force' "
+                f"to make the .ipynb authoritative."
+            )
+            return 1
+        pending.append((source_notebook, target_notebook, regenerated_text, content_changed))
+
+    for source_notebook, target_notebook, regenerated_text, content_changed in pending:
+        if not target_notebook.exists() or content_changed:
+            target_notebook.parent.mkdir(parents=True, exist_ok=True)
+            target_notebook.write_text(regenerated_text, encoding="utf-8")
+        record_workflow_state(
+            state,
+            source_notebook=source_notebook,
+            tracked_notebook=target_notebook,
+            root=ROOT,
+            operation="sync",
+        )
+    save_workflow_state(ROOT, state)
 
     print("Notebook sync complete.")
     return 0
@@ -1152,7 +1266,12 @@ from pathlib import Path
 import jupytext
 
 from notebook_workflow_config import collect_tracked_notebooks
+from notebook_workflow_config import file_digest
+from notebook_workflow_config import load_workflow_state
 from notebook_workflow_config import load_managed_roots
+from notebook_workflow_config import record_workflow_state
+from notebook_workflow_config import save_workflow_state
+from notebook_workflow_config import state_key
 from notebook_workflow_config import resolve_tracked_notebook_arg
 from notebook_workflow_config import source_path_for_tracked
 
@@ -1167,6 +1286,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         help="Specific notebook to regenerate (e.g., 'starter_notebook.py'). If omitted, regenerates all notebooks.",
     )
+    parser.add_argument("--force", action="store_true", help="Overwrite source files when both sides changed.")
     args = parser.parse_args(argv)
 
     try:
@@ -1195,12 +1315,56 @@ def main(argv: list[str] | None = None) -> int:
             print("No tracked notebooks found under configured managed roots.")
             return 0
 
+    try:
+        state = load_workflow_state(ROOT)
+    except ValueError as exc:
+        print(f"Notebook workflow state error: {exc}", file=sys.stderr)
+        return 2
+
+    changed = False
     for managed_root, tracked_notebook in notebook_entries:
         source_notebook = source_path_for_tracked(tracked_notebook, managed_root)
         source_notebook.parent.mkdir(parents=True, exist_ok=True)
 
         notebook_object = jupytext.read(tracked_notebook, fmt="py:percent")
-        jupytext.write(notebook_object, source_notebook, fmt="ipynb")
+        regenerated_text = jupytext.writes(notebook_object, fmt="ipynb")
+        source_key = state_key(source_notebook, ROOT)
+        previous = state.get("notebooks", {}).get(source_key)
+        tracked_changed = not previous or previous.get("tracked_sha256") != file_digest(tracked_notebook)
+        source_changed = source_notebook.exists() and (
+            not previous or previous.get("source_sha256") != file_digest(source_notebook)
+        )
+        content_changed = source_notebook.exists() and source_notebook.read_text(encoding="utf-8") != regenerated_text
+
+        if content_changed and source_changed and tracked_changed and not args.force:
+            print(
+                f"Regeneration conflict for {source_notebook.relative_to(ROOT)}: both the .ipynb and .py changed "
+                f"since the last recorded sync. Resolve manually, or run 'pixi run regenerate-notebooks --force' "
+                f"to make the .py authoritative.",
+                file=sys.stderr,
+            )
+            return 1
+        if content_changed and source_changed and not args.force:
+            print(
+                f"Regeneration refused for {source_notebook.relative_to(ROOT)}: the existing .ipynb has "
+                f"changed since the last recorded sync. Use 'pixi run regenerate-notebooks --force' to replace it.",
+                file=sys.stderr,
+            )
+            return 1
+
+        if not source_notebook.exists() or content_changed:
+            source_notebook.write_text(regenerated_text, encoding="utf-8")
+        record_workflow_state(
+            state,
+            source_notebook=source_notebook,
+            tracked_notebook=tracked_notebook,
+            root=ROOT,
+            operation="regen",
+        )
+        changed = True
+
+    if changed:
+        save_workflow_state(ROOT, state)
 
     print("Notebook regeneration complete.")
     return 0
