@@ -524,7 +524,8 @@ x_vals_450 = np.arange(0,36)*scaling_factor_450mM
 # %%
 # supplemental figure showing dopamine with first x mg of NaCl removed
 
-f, ax = plt.subplots(ncols=1, figsize=(3, 2))
+f, ax = plt.subplots(ncols=1, figsize=(3, 2),
+                     gridspec_kw={"left": 0.25, "bottom": 0.3})
 
 
 
@@ -538,7 +539,12 @@ ax.errorbar(x_vals_450_red, deplete_450_red, yerr=deplete_450_sem_red, color=col
 ax.set_xlabel("NaCl (mg)")
 ax.set_ylabel("Dopamine AUC")
 
+xticks = [0, 20, 40, 60, 80]
+ax.set_xticks(xticks, labels = [str(int(tick+30)) for tick in xticks])
+
 sns.despine(ax=ax, offset=5)
 ax.axhline(0, color="k", linestyle="--",alpha=0.3, zorder=-10)
+
+save_figure_atomic(f, "figSx_nacl_da_trimmed", FIGSFOLDER)
 
 # %%
