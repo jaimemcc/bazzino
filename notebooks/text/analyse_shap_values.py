@@ -19,7 +19,19 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 import seaborn as sns
+
+from figure_config import (
+    configure_matplotlib, COLORS, HEATMAP_CMAP_DIV,
+    # HEATMAP_CMAP_RED, HEATMAP_CMAP_BLUE,
+    # DATAFOLDER, RESULTSFOLDER, FIGSFOLDER,
+    # HEATMAP_VLIM_BEHAV, YLIMS_BEHAV,
+    # BEHAV_SMOOTH_WINDOW, SAVE_FIGS
+)
+
+
 
 # %%
 DATAFOLDER = Path("../data/shap_values")
@@ -109,11 +121,10 @@ feature_groups["group"] = feature_groups["feature"].apply(assign_group)
 # %%
 cumul_summary
 
-# %%
-# Plot all features with cumulative SHAP importance on x and feature rows on y.
-from matplotlib.colors import ListedColormap
-from matplotlib.patches import Patch
 
+# %%
+# Add bodypart groups and timewindow
+ 
 def assign_bodypart(feature: str) -> str:
     feature_lower = feature.lower()
     if "all_bodyparts" in feature_lower:
@@ -144,6 +155,12 @@ cumul_summary = (
 )
 cumul_summary["bodypart"] = cumul_summary["feature"].apply(assign_bodypart)
 cumul_summary["time_window"] = cumul_summary["feature"].apply(get_time_window)
+
+# %%
+COLORS
+
+# %%
+# Plot all features with cumulative SHAP importance on x and feature rows on y.
 
 bodypart_colors = {
     "nose": "#d95f02",
@@ -212,9 +229,10 @@ for ytick, row in enumerate(cumul_summary.itertuples(index=False)):
         facecolors="w",
         alpha=0.5,
         s=30,
+        clip_on=False
     )
 
-ax2.set_xlabel("Cumulative absolute SHAP importance")
+ax2.set_xlabel("Cumulative SHAP importance")
 
 bodypart_legend = [
     Patch(color=color, label=label)
@@ -245,9 +263,22 @@ ax1.set_ylabel("Features")
 
 sns.despine(ax=ax1, left=True, bottom=True)
 sns.despine(ax=ax_window, left=True, bottom=True)
-sns.despine(ax=ax2)
+sns.despine(ax=ax2, offset=5)
 for axis in [ax1, ax_window, ax2]:
     axis.set_yticks([])
+
+# %%
+# make fig showing aggregated SHAP importance for movement
+
+# need to get info from RAW file and place by features in df
+
+f, ax = plt.subplots()
+
+
+
+# %%
+# maybe make figure where an erro is shown representing deviation/variability in each feature's importance
+
 
 # %%
 # Sum importance within each semantic family
