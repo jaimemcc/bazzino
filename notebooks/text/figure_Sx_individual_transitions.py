@@ -105,15 +105,19 @@ df_transition
 
 
 # %%
-f, ax = plt.subplots(figsize=(4, 1.5))
 
+f, ax = plt.subplots(figsize=(4, 1.5),
+                     gridspec_kw={"left": 0.4, "bottom": 0.4},)
+
+np.random.seed(12)
 for _, row in df_transition.iterrows():
     if row.sex == "M":
         marker = "^"
     elif row.sex == "F":
         marker = "o"
 
-    jitter = np.random.random(1) * 0.1
+    
+    jitter = np.random.random(1) * 0.1 - 0.05
     print(jitter)
 
     ax.scatter(row.da_transition, 1+jitter[0],
@@ -131,15 +135,54 @@ for _, row in df_transition.iterrows():
 
 ax.axvline(15, linestyle="--", alpha=0.5, zorder=-20, color="k")
 
-ax.set_yticks([1,2], labels=["DA transition", "Behav transition"])
+ax.set_yticks([1,2], labels=["Dopamine transition", "Behav transition"])
 ax.set_xlabel("Trial")
+ax.set_ylim(0.7, 2.3)
+ax.set_xticks([0,25,50])
 sns.despine(offset=5)
+
+save_figure_atomic(f, "figSx_da_and_behav_transitions", FIGSFOLDER)
 
 
 
 # %%
+# stats to test whether transition points differ by sex
+
+from scipy import stats
+
+for variable in ["behav_transition", "da_transition"]:
+    female = df_transition.loc[
+        df_transition["sex"] == "F", variable
+    ].dropna()
+
+    male = df_transition.loc[
+        df_transition["sex"] == "M", variable
+    ].dropna()
+
+    # Welch's independent-samples t-test
+    t_stat, t_p = stats.ttest_ind(
+        female,
+        male,
+        equal_var=False,
+    )
+
+    # Mann-Whitney U test
+    u_stat, u_p = stats.mannwhitneyu(
+        female,
+        male,
+        alternative="two-sided",
+    )
+
+    print(f"\n{variable}")
+    print(f"F: n={len(female)}, mean={female.mean():.2f}, SD={female.std():.2f}")
+    print(f"M: n={len(male)}, mean={male.mean():.2f}, SD={male.std():.2f}")
+    print(f"Welch t-test: t={t_stat:.2f}, p={t_p:.3f}")
+    print(f"Mann-Whitney U: U={u_stat:.2f}, p={u_p:.3f}")
+
+# %%
 # plot with body weight
-f, [ax1, ax2] = plt.subplots(figsize=(3, 1.5), ncols=2, sharey=True)
+f, [ax1, ax2] = plt.subplots(figsize=(3, 1.5), ncols=2, sharey=True,
+                             gridspec_kw={"left": 0.3, "bottom": 0.4, "wspace": 0.3})
 
 for _, row in df_transition.iterrows():
     if row.sex == "M":
@@ -147,23 +190,77 @@ for _, row in df_transition.iterrows():
     elif row.sex == "F":
         marker = "o"
 
-    ax1.scatter(row.da_transition, row.bodyweight,
-               marker=marker,
-               facecolors="w", edgecolors=DA_COLOR)
-
-    ax2.scatter(row.behav_transition, row.bodyweight,
+    ax1.scatter(row.behav_transition, row.bodyweight,
             marker=marker,
-            facecolors="w", edgecolors=BEHAV_COLOR)
+            facecolors="w", edgecolors=BEHAV_COLOR,
+            clip_on=False)
+    
+    ax2.scatter(row.da_transition, row.bodyweight,
+               marker=marker,
+               facecolors="w", edgecolors=DA_COLOR,
+               clip_on=False)
+
+
+sns.regplot(
+    data=df_transition,
+    x="behav_transition",
+    y="bodyweight",
+    ax=ax1,
+    scatter=False,
+    ci=None,
+    color=BEHAV_COLOR,
+    line_kws={"linewidth": 1, "linestyle": "--"},
+)
+
+sns.regplot(
+    data=df_transition,
+    x="da_transition",
+    y="bodyweight",
+    ax=ax2,
+    scatter=False,
+    ci=None,
+    color=DA_COLOR,
+    line_kws={"linewidth": 1, "linestyle": "--"},
+)
+
+ax1.set_xlabel("Behav transition")
+ax2.set_xlabel("DA transition")
 
 ax1.set_ylabel("Body weight (g)")
-ax1.set_xlabel("DA transition")
-ax2.set_xlabel("Behav transition")
+ax2.set_ylabel("")
 
 for axis in [ax1, ax2]:
     sns.despine(ax=axis, offset=5)
     axis.set_xlim(0, 50)
 
+save_figure_atomic(f, "figSx_transitions_vs_bodyweight", FIGSFOLDER)
 
 
+
+# %%
+import statsmodels.formula.api as smf
+
+model = smf.ols(
+    "behav_transition ~ bodyweight",
+    data=df_transition
+).fit()
+
+print(model.summary())
+
+# %%
+model = smf.ols(
+    "da_transition ~ bodyweight",
+    data=df_transition
+).fit()
+
+print(model.summary())
+
+# %%
+model = smf.ols(
+    "behav_transition ~ bodyweight + C(sex)",
+    data=df_transition
+).fit()
+
+print(model.summary())
 
 # %%
