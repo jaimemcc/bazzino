@@ -66,26 +66,12 @@ DATAFOLDER = Path("../data/shap_values")
 df_shap, df_shap_raw, feature_summary = assemble_shap_dfs(DATAFOLDER)
 
 # Compatibility views used by the exploratory plots below.
-feature_groups = feature_summary[["feature", "importance", "group"]].copy()
-cumul_summary = feature_summary.copy()
+# feature_groups = feature_summary[["feature", "importance", "group"]].copy()
+# cumul_summary = feature_summary.copy()
 
 # %%
 feature_summary
 
-
-# %%
-summary = feature_summary.set_index("feature")["importance"]
-top_features = summary.head(15)
-
-ax = top_features.plot.barh(figsize=(8, 6), color="#1f77b4")
-ax.invert_yaxis()
-ax.set_title("Top 15 features by mean absolute SHAP value")
-ax.set_xlabel("Mean |SHAP value|")
-ax.set_ylabel("Feature")
-plt.tight_layout()
-plt.show()
-
-summary.head(15)
 
 # %%
 # Plot all features with cumulative SHAP importance on x and feature rows on y.
@@ -94,22 +80,21 @@ bodypart_colors = {
     "nose": "#d95f02",
     "tail base": "#1b9e77",
     "head base": "#7570b3",
-    "left ear": "#e7298a",
-    "right ear": "#66a61e",
+    "ears": "#e7298a",
     "all body parts": "#e6ab02",
     "whole mouse": "#a6761d",
     "other": "#bdbdbd",
 }
 bodypart_codes = {name: code for code, name in enumerate(bodypart_colors)}
-bodypart_values = cumul_summary["bodypart"].map(bodypart_codes).to_numpy()
+bodypart_values = feature_summary["bodypart"].map(bodypart_codes).to_numpy()
 
 window_order = ["none", "2", "5", "6", "7.5", "10"]
 window_colors = ["#d9d9d9", "#440154", "#31688e", "#35b779", "#90d743", "#fde725"]
 window_codes = {name: code for code, name in enumerate(window_order)}
-window_values = cumul_summary["timewindow"].map(window_codes).to_numpy()
+window_values = feature_summary["timewindow"].map(window_codes).to_numpy()
 
 f, [ax1, ax_window, ax2] = plt.subplots(
-    figsize=(5.5, 6),
+    figsize=(5, 5),
     ncols=3,
     sharey=True,
     gridspec_kw={"width_ratios": [0.05, 0.05, 1], "wspace": 0.08},
@@ -136,12 +121,12 @@ for axis in [ax1, ax_window]:
     axis.set_xticks([])
     axis.set_yticks([])
     axis.set_xlim(-0.5, 0.5)
-    axis.set_ylim(len(cumul_summary) - 0.5, -0.5)
+    axis.set_ylim(len(feature_summary) - 0.5, -0.5)
 
 ax1.set_title("Body\npart", fontsize=8)
 ax_window.set_title("Time\nwindow", fontsize=8)
 
-for ytick, row in enumerate(cumul_summary.itertuples(index=False)):
+for ytick, row in enumerate(feature_summary.itertuples(index=False)):
     color = {"movement": "red", "geometry": "blue"}.get(row.group, "grey")
     ax2.scatter(
         row.cumulative_importance,
@@ -187,64 +172,86 @@ sns.despine(ax=ax_window, left=True, bottom=True)
 sns.despine(ax=ax2, offset=5)
 for axis in [ax1, ax_window, ax2]:
     axis.set_yticks([])
+    
+save_figure_atomic(f, "figSx_cumul_shap_importance", FIGSFOLDER)
 
 # %%
-# make fig showing aggregated SHAP importance for movement
+# Bar + scatter plot comparing signed SHAP importance for movement vs geometry.
+# Reverse-coded features have their sign flipped back (aligned_signed_importance)
+# so they combine meaningfully with raw features on the same bar; they're
+# plotted as squares, raw features as circles. Sign: negative means the
+# (non-reverse-coded) feature must go DOWN to drive Appetitive up.
 
-# need to get info from RAW file and place by features in df
+group_order = ["tortuosity", "geometry", "movement"]
+group_colors = {"geometry": "#1b9e77", "movement": "#d95f02", "tortuosity": "#7570b3"}
+group_positions = {name: i for i, name in enumerate(group_order)}
 
-f, ax = plt.subplots()
+plot_df = feature_summary[feature_summary["group"].isin(group_order)]
+group_means = plot_df.groupby("group")["aligned_signed_importance"].mean().reindex(group_order)
 
+rng = np.random.default_rng(42)
 
+f, ax = plt.subplots(figsize=(4, 3),
+                     gridspec_kw={"left": 0.3, "bottom": 0.2})
+
+for group_name in group_order:
+    y = group_positions[group_name]
+    ax.barh(
+        y,
+        group_means[group_name],
+        color=group_colors[group_name],
+        alpha=0.4,
+        height=0.6,
+        zorder=1,
+    )
+
+    group_data = plot_df[plot_df["group"] == group_name]
+    jitter = rng.uniform(-0.15, 0.15, size=len(group_data))
+    for marker, is_reverse in [("s", True), ("o", False)]:
+        mask = group_data["reverse_coded"] == is_reverse
+        ax.scatter(
+            group_data.loc[mask, "aligned_signed_importance"],
+            y + jitter[mask.to_numpy()],
+            marker=marker,
+            color=group_colors[group_name],
+            edgecolors="k",
+            linewidths=0.3,
+            s=25,
+            alpha=0.7,
+            zorder=2,
+        )
+
+ax.axvline(0, color="0.3", linewidth=0.8, zorder=0)
+ax.set_yticks(list(group_positions.values()))
+ax.set_yticklabels(["Tortuosity", "Geometry", "Movement"])
+ax.set_xlabel("Signed SHAP importance")
+ax.set_ylabel("Feature group")
+
+sns.despine(ax=ax, offset=5)
+
+save_figure_atomic(f, "figure_Sx_signed_shap_importance_by_group", FIGSFOLDER)
 
 # %%
-# maybe make figure where an erro is shown representing deviation/variability in each feature's importance
+# Movement features where signed_importance is positive, i.e. the raw value
+# must go UP to drive the Appetitive prediction up. Grouped by reverse_coded
+# first so raw vs already-flipped features are easy to tell apart.
+positive_movement = (
+    feature_summary[
+        (feature_summary["group"] == "movement")
+        & (feature_summary["signed_importance"] > 0)
+    ]
+    .sort_values(["reverse_coded", "signed_importance"], ascending=[False, False])
+)
+
+print(f"{len(positive_movement)} movement features with positive signed_importance:")
+positive_movement[["feature", "importance", "raw_shap_corr", "signed_importance", "reverse_coded"]]
 
 
 # %%
 COLORS
 
 # %%
-# Sum importance within each semantic family
-summary_by_group = (
-    feature_groups.groupby("group", as_index=False)["importance"]
-    .sum()
-    .sort_values("importance", ascending=False)
-)
-
-summary_by_group["group"] = summary_by_group["group"].replace({
-    "movement": "Movement",
-    "body_hull_geometry": "Body/hull geometry",
-    "other": "Other",
-})
-
-summary_by_group
-
-ax = summary_by_group.set_index("group").plot.barh(figsize=(8, 4), color=["red", "blue", "green"])
-ax.invert_yaxis()
-ax.set_title("SHAP importance by semantic feature group")
-ax.set_xlabel("Total absolute SHAP importance")
-ax.set_ylabel("Feature group")
-plt.tight_layout()
-plt.show()
-
-# %%
 feature_groups
-
-# %%
-# Create a readable table showing which features were grouped together
-feature_group_table = (
-    feature_groups
-    .assign(group_name=feature_groups["group"].replace({
-        "movement": "Movement",
-        "body_hull_geometry": "Body/hull geometry",
-        "other": "Other",
-    }))
-    .sort_values(["group_name", "feature"])
-    [["group_name", "feature", "importance"]]
-)
-
-feature_group_table.head(50)
 
 # %%
 from sklearn.decomposition import PCA
@@ -292,6 +299,52 @@ plt.tight_layout()
 plt.show()
 
 pca_df.head()
+
+# Feature loadings for PC1/PC2, coloured by semantic group so we can see
+# whether movement and geometry features load onto different components.
+# Marker size reflects |signed SHAP importance|, so the most influential
+# features (in either direction) stand out within each group.
+loading_df = pd.DataFrame(
+    pca_2.components_.T,
+    index=feature_matrix.columns,
+    columns=["PC1", "PC2"],
+)
+loading_df = loading_df.join(
+    feature_summary.set_index("feature")[["group", "signed_importance"]]
+)
+
+loading_group_colors = {
+    "movement": "#d95f02",
+    "geometry": "#1b9e77",
+    "tortuosity": "#7570b3",
+    "other": "#bdbdbd",
+}
+max_abs_importance = loading_df["signed_importance"].abs().max()
+
+f, ax = plt.subplots(figsize=(5, 4),
+                     gridspec_kw={"left": 0.3, "bottom": 0.2})
+for group_name, group_data in loading_df.groupby("group", sort=False):
+    sizes = 200 * group_data["signed_importance"].abs() / max_abs_importance
+    ax.scatter(
+        group_data["PC1"],
+        group_data["PC2"],
+        s=sizes.clip(lower=10),
+        color=loading_group_colors.get(group_name, "#bdbdbd"),
+        alpha=0.6,
+        edgecolors="k",
+        linewidths=0.3,
+        label=group_name.title(),
+    )
+
+ax.axhline(0, color="0.7", linewidth=0.8)
+ax.axvline(0, color="0.7", linewidth=0.8)
+# ax.set_title("PCA feature loadings by group\n(marker size = |signed SHAP importance|)")
+ax.set_xlabel("PC1 loading")
+ax.set_ylabel("PC2 loading")
+ax.legend(frameon=False, loc="lower left")
+sns.despine(ax=ax, offset=5)
+
+save_figure_atomic(f, "figSx_pca_feature_loadings", FIGSFOLDER)
 
 # %%
 from sklearn.decomposition import PCA

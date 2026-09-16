@@ -3,6 +3,7 @@
 from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
 
 
@@ -14,20 +15,35 @@ _SHAP_DROP_COLUMNS = [
 ]
 
 
+def _strip_reverse_suffix(feature: str) -> str:
+    """Strip trailing reverse-coding suffixes to recover the base feature name."""
+    for suffix in ("_percentile_rank", "_deviation"):
+        if feature.endswith(suffix):
+            feature = feature[: -len(suffix)]
+    return feature
+
+
 def assign_group(feature: str) -> str:
-    """Assign a feature to movement, geometry, or other."""
+    """Assign a feature to movement, geometry, tortuosity, or other.
+
+    Reverse-coding suffixes (_deviation, _percentile_rank) are stripped first
+    so a feature's semantic group reflects the underlying signal, not whether
+    it has been reverse-coded (see `is_reverse_coded` for that).
+    """
+    base = _strip_reverse_suffix(feature)
+    if re.search(r"^Tortuosity_", base):
+        return "tortuosity"
     if re.search(
         r"^(Movement_mouse_(nose|tail_base|left_ear|right_ear|head_base)|"
-        r"Total_movement_all_bodyparts_M1|Total_movement_M1_|"
-        r"Tail_base_movement_M1_|Head_base_movement_M1_|Nose_movement_M1_)"
-        r"|(_deviation|_percentile_rank)$",
-        feature,
+        r"Total_movement_all_bodyparts(_M1)?|Total_movement_M1_|"
+        r"Tail_base_movement_M1_|Head_base_movement_M1_|Nose_movement_M1_)",
+        base,
     ):
         return "movement"
     if re.search(
         r"^(Mouse_nose_to_tail|Mouse_head_to_tail|Mouse_Ear_distance|"
         r"M1_|Mouse1_(smallest|largest|mean)_euclid_distances_)",
-        feature,
+        base,
     ):
         return "geometry"
     return "other"
@@ -42,10 +58,7 @@ def assign_bodypart(feature: str) -> str:
         ("nose", "nose"),
         ("tail_base", "tail base"),
         ("head_base", "head base"),
-        ("left_ear", "left ear"),
-        ("ear_left", "left ear"),
-        ("right_ear", "right ear"),
-        ("ear_right", "right ear"),
+        ("ear", "ears"),
     ]:
         if key in feature_lower:
             return label
@@ -55,14 +68,40 @@ def assign_bodypart(feature: str) -> str:
 
 
 def get_time_window(feature: str) -> str:
-    """Extract the trailing rolling-window value from a feature name."""
-    match = re.search(r"_(\d+(?:\.\d+)?)$", feature)
+    """Extract the rolling-window value from a feature name.
+
+    Looks at the very end of the name, allowing the number to be followed by
+    a reverse-coding suffix, so e.g. `..._mean_10_percentile_rank` still
+    resolves to window "10" instead of "none".
+    """
+    match = re.search(r"_(\d+(?:\.\d+)?)(?:_deviation|_percentile_rank)*$", feature)
     return match.group(1) if match else "none"
 
 
 def is_reverse_coded(feature: str) -> bool:
     """Identify relative-to-average features using the project naming convention."""
     return feature.endswith(("_deviation", "_percentile_rank"))
+
+
+def _find_duplicate_percentile_rank_columns(df_shap_raw: pd.DataFrame) -> list[str]:
+    """Find _percentile_rank columns that exactly duplicate a _deviation column.
+
+    Some rolling-window features compute _percentile_rank with the same
+    "mean - current" formula as _deviation instead of a true percentile rank
+    (see hybrid_feature_extractor.py), so they carry no new information.
+    """
+    duplicates = []
+    for column in df_shap_raw.columns:
+        if not column.endswith("_percentile_rank"):
+            continue
+        deviation_column = column[: -len("_percentile_rank")] + "_deviation"
+        if deviation_column not in df_shap_raw.columns:
+            continue
+        if pd.to_numeric(df_shap_raw[column], errors="coerce").equals(
+            pd.to_numeric(df_shap_raw[deviation_column], errors="coerce")
+        ):
+            duplicates.append(column)
+    return duplicates
 
 
 def _read_shap_tables(datafolder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -84,6 +123,11 @@ def _read_shap_tables(datafolder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     df_shap = df_shap.drop(columns=_SHAP_DROP_COLUMNS, errors="ignore")
     df_shap_raw = df_shap_raw.drop(columns=["Unnamed: 0"], errors="ignore")
+
+    # Drop _percentile_rank columns that are exact duplicates of _deviation.
+    duplicate_columns = _find_duplicate_percentile_rank_columns(df_shap_raw)
+    df_shap = df_shap.drop(columns=duplicate_columns, errors="ignore")
+    df_shap_raw = df_shap_raw.drop(columns=duplicate_columns, errors="ignore")
     return df_shap, df_shap_raw
 
 
@@ -104,6 +148,13 @@ def _make_feature_summary(
     shap_target = df_shap.loc[target_mask, feature_columns]
     shap_non_target = df_shap.loc[non_target_mask, feature_columns]
 
+    # Correlation between each feature's raw value and its own SHAP value.
+    # A negative correlation means a *lower* raw value pushes SHAP (and the
+    # prediction) up, e.g. movement features where less movement means more
+    # appetitive; a positive correlation means a *higher* raw value pushes
+    # the prediction up.
+    raw_shap_corr = shap_all.corrwith(raw_all).reindex(feature_columns)
+
     feature_summary = pd.DataFrame({
         "feature": feature_columns,
         "mean_shap": shap_all.mean().to_numpy(),
@@ -115,15 +166,32 @@ def _make_feature_summary(
         "raw_sd": raw_all.std().reindex(feature_columns).to_numpy(),
         "raw_min": raw_all.min().reindex(feature_columns).to_numpy(),
         "raw_max": raw_all.max().reindex(feature_columns).to_numpy(),
+        "raw_shap_corr": raw_shap_corr.to_numpy(),
     })
     feature_summary["class_difference"] = (
         feature_summary["mean_shap_appetitive"]
         - feature_summary["mean_shap_non_appetitive"]
     )
+    # Signed importance: magnitude from mean |SHAP|, sign from the direction
+    # of the raw-value relationship, so a feature that must go *down* to
+    # drive the prediction up gets a negative value here.
+    feature_summary["signed_importance"] = feature_summary["importance"] * np.sign(
+        feature_summary["raw_shap_corr"]
+    )
     feature_summary["group"] = feature_summary["feature"].apply(assign_group)
     feature_summary["bodypart"] = feature_summary["feature"].apply(assign_bodypart)
     feature_summary["timewindow"] = feature_summary["feature"].apply(get_time_window)
     feature_summary["reverse_coded"] = feature_summary["feature"].apply(is_reverse_coded)
+    # Same as signed_importance, but with the sign flipped back for
+    # reverse-coded features so it reflects the direction of the original
+    # (non-reverse-coded) underlying signal, comparable across both.
+    feature_summary["aligned_signed_importance"] = feature_summary["signed_importance"] * feature_summary[
+        "reverse_coded"
+    ].map({True: -1, False: 1})
+    # Group split by reverse-coding, e.g. "movement" vs "movement, reverse coded".
+    feature_summary["display_group"] = feature_summary["group"] + feature_summary["reverse_coded"].map(
+        {True: ", reverse coded", False: ""}
+    )
     feature_summary = feature_summary.sort_values("importance", ascending=False).reset_index(drop=True)
     feature_summary["cumulative_importance"] = (
         feature_summary["importance"].cumsum() / feature_summary["importance"].sum()
