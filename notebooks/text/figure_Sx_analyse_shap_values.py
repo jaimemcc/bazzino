@@ -13,72 +13,68 @@
 # ---
 
 # %%
+# %load_ext autoreload
+# %autoreload 2
+
 from pathlib import Path
+import sys
 import re
+
+# Register dill/pathlib compatibility shim BEFORE importing dill
+sys.path.insert(0, str(Path("../src").resolve()))
+from pickle_compat import enable_dill_pathlib_compat
+enable_dill_pathlib_compat()
+
 import numpy as np
 import pandas as pd
-
 import matplotlib.pyplot as plt
+import seaborn as sns
+import dill
+
+from matplotlib.colors import to_hex
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-import seaborn as sns
+
+from trompy import save_figure_atomic
 
 from figure_config import (
     configure_matplotlib, COLORS, HEATMAP_CMAP_DIV,
-    # HEATMAP_CMAP_RED, HEATMAP_CMAP_BLUE,
-    # DATAFOLDER, RESULTSFOLDER, FIGSFOLDER,
-    # HEATMAP_VLIM_BEHAV, YLIMS_BEHAV,
-    # BEHAV_SMOOTH_WINDOW, SAVE_FIGS
+    DATAFOLDER, RESULTSFOLDER, FIGSFOLDER,
+    SAVE_FIGS
 )
 
+# from utils import make_realigned_trials
+from realignment_helpers import get_realigned_data
+
+SAVE_FIGS = True
+
+# Configure matplotlib
+configure_matplotlib()
+colors = COLORS  # Use shared color palette
+custom_cmap = HEATMAP_CMAP_DIV  # Use shared colormap
+
+# 11 evenly spaced colors from custom_cmap
+sampled_hex = [to_hex(custom_cmap(x)) for x in np.linspace(0, 1, 11)]
+DA_COLOR = sampled_hex[0]  # Choose the 3rd color for DA
+BEHAV_COLOR = sampled_hex[-1]  # Choose the 6th color for behavior
 
 
 # %%
+from assemble_shap_dfs import assemble_shap_dfs, assign_group
+
 DATAFOLDER = Path("../data/shap_values")
+df_shap, df_shap_raw, feature_summary = assemble_shap_dfs(DATAFOLDER)
 
-df_shap, df_shap_raw = [], []
+# Compatibility views used by the exploratory plots below.
+feature_groups = feature_summary[["feature", "importance", "group"]].copy()
+cumul_summary = feature_summary.copy()
 
-for folder in [f for f in DATAFOLDER.iterdir() if f.is_dir()]:
-    print(f"Folder: {folder.name}")
-    tmp = pd.read_csv(folder / "SHAP_values_Appetitive.csv")
-    df_shap.append(tmp)
-    tmp = pd.read_csv(folder / "RAW_SHAP_feature_values_Appetitive.csv")
-    df_shap_raw.append(tmp)
-
-
-df_shap = pd.concat(df_shap, axis=0).reset_index(drop=True)
-df_shap_raw = pd.concat(df_shap_raw, axis=0).reset_index(drop=True)
-
-df_shap = (
-    df_shap
-    .drop(columns=["Unnamed: 0", "Prediction_probability", "Sum", "Expected_value"], errors="ignore")
-)
-
-df_shap_raw = (
-    df_shap_raw
-    .drop(columns=["Unnamed: 0"], errors="ignore")
-)
-
-
+# %%
+feature_summary
 
 
 # %%
-df_shap.shape
-
-
-# %%
-df_shap.query("Appetitive == 1").mean().sort_values(ascending=False)
-
-# %%
-
-summary = (
-    df_shap.query("Appetitive == 1")
-    .drop(columns=["Appetitive", "Unnamed: 0", "Prediction_probability", "Sum", "Expected_value"], errors="ignore")
-    .abs()
-    .mean()
-    .sort_values(ascending=False)
-)
-
+summary = feature_summary.set_index("feature")["importance"]
 top_features = summary.head(15)
 
 ax = top_features.plot.barh(figsize=(8, 6), color="#1f77b4")
@@ -90,74 +86,6 @@ plt.tight_layout()
 plt.show()
 
 summary.head(15)
-
-
-# %%
-# Group features into movement, body/hull geometry, or other.
-
-def assign_group(col: str) -> str:
-    if re.search(
-        r"^(Movement_mouse_(nose|tail_base|left_ear|right_ear|head_base)|"
-        r"Total_movement_all_bodyparts_M1|Total_movement_M1_|"
-        r"Tail_base_movement_M1_|Head_base_movement_M1_|Nose_movement_M1_)"
-        r"|(_deviation|_percentile_rank)$",
-        col,
-    ):
-        return "movement"
-    if re.search(
-        r"^(Mouse_nose_to_tail|Mouse_head_to_tail|Mouse_Ear_distance|"
-        r"M1_|Mouse1_(smallest|largest|mean)_euclid_distances_)",
-        col,
-    ):
-        return "body_hull_geometry"
-    return "other"
-
-feature_groups = pd.DataFrame({
-    "feature": summary.index,
-    "importance": summary.abs().values,
-})
-feature_groups["group"] = feature_groups["feature"].apply(assign_group)
-
-# %%
-cumul_summary
-
-
-# %%
-# Add bodypart groups and timewindow
- 
-def assign_bodypart(feature: str) -> str:
-    feature_lower = feature.lower()
-    if "all_bodyparts" in feature_lower:
-        return "all body parts"
-    for key, label in [
-        ("nose", "nose"),
-        ("tail_base", "tail base"),
-        ("head_base", "head base"),
-        ("left_ear", "left ear"),
-        ("ear_left", "left ear"),
-        ("right_ear", "right ear"),
-        ("ear_right", "right ear"),
-    ]:
-        if key in feature_lower:
-            return label
-    if feature_lower.startswith(("mouse_", "mouse1_")) or "total" in feature_lower:
-        return "whole mouse"
-    print(f"Feature: {feature}, no body part assigned")
-    return "other"
-
-def get_time_window(feature: str):
-    match = re.search(r"_(\d+(?:\.\d+)?)$", feature)
-    return match.group(1) if match else "none"
-
-cumul_summary = (
-    feature_groups
-    .assign(cumulative_importance=lambda x: x.importance.cumsum() / np.sum(x.importance))
-)
-cumul_summary["bodypart"] = cumul_summary["feature"].apply(assign_bodypart)
-cumul_summary["time_window"] = cumul_summary["feature"].apply(get_time_window)
-
-# %%
-COLORS
 
 # %%
 # Plot all features with cumulative SHAP importance on x and feature rows on y.
@@ -178,7 +106,7 @@ bodypart_values = cumul_summary["bodypart"].map(bodypart_codes).to_numpy()
 window_order = ["none", "2", "5", "6", "7.5", "10"]
 window_colors = ["#d9d9d9", "#440154", "#31688e", "#35b779", "#90d743", "#fde725"]
 window_codes = {name: code for code, name in enumerate(window_order)}
-window_values = cumul_summary["time_window"].map(window_codes).to_numpy()
+window_values = cumul_summary["timewindow"].map(window_codes).to_numpy()
 
 f, [ax1, ax_window, ax2] = plt.subplots(
     figsize=(5.5, 6),
@@ -187,7 +115,6 @@ f, [ax1, ax_window, ax2] = plt.subplots(
     gridspec_kw={"width_ratios": [0.05, 0.05, 1], "wspace": 0.08},
 )
 
-# One-column heatmaps: one colored cell for each feature row.
 ax1.imshow(
     bodypart_values[:, None],
     aspect="auto",
@@ -215,13 +142,7 @@ ax1.set_title("Body\npart", fontsize=8)
 ax_window.set_title("Time\nwindow", fontsize=8)
 
 for ytick, row in enumerate(cumul_summary.itertuples(index=False)):
-    group = str(row.group)
-    if "movement" in group:
-        color = "red"
-    elif "body_hull_geometry" in group:
-        color = "blue"
-    else:
-        color = "grey"
+    color = {"movement": "red", "geometry": "blue"}.get(row.group, "grey")
     ax2.scatter(
         row.cumulative_importance,
         ytick,
@@ -229,7 +150,7 @@ for ytick, row in enumerate(cumul_summary.itertuples(index=False)):
         facecolors="w",
         alpha=0.5,
         s=30,
-        clip_on=False
+        clip_on=False,
     )
 
 ax2.set_xlabel("Cumulative SHAP importance")
@@ -259,7 +180,7 @@ ax2.legend(
 )
 ax2.add_artist(bodypart_legend_artist)
 
-ax1.set_ylabel("Features")
+ax1.set_ylabel("Features (in order of importance)")
 
 sns.despine(ax=ax1, left=True, bottom=True)
 sns.despine(ax=ax_window, left=True, bottom=True)
@@ -281,6 +202,9 @@ f, ax = plt.subplots()
 
 
 # %%
+COLORS
+
+# %%
 # Sum importance within each semantic family
 summary_by_group = (
     feature_groups.groupby("group", as_index=False)["importance"]
@@ -296,7 +220,7 @@ summary_by_group["group"] = summary_by_group["group"].replace({
 
 summary_by_group
 
-ax = summary_by_group.set_index("group").plot.barh(figsize=(8, 4), color="#2ca02c")
+ax = summary_by_group.set_index("group").plot.barh(figsize=(8, 4), color=["red", "blue", "green"])
 ax.invert_yaxis()
 ax.set_title("SHAP importance by semantic feature group")
 ax.set_xlabel("Total absolute SHAP importance")
@@ -406,8 +330,8 @@ plt.show()
 pca_df.head()
 
 # %%
-# Inspect the feature loadings for the first two principal components.
-# Larger absolute values indicate stronger contribution to that component.
+# Inspect and plot feature loadings for the first two principal components.
+# Each point is a feature; colour indicates its semantic feature group.
 
 loading_df = pd.DataFrame(
     pca_2.components_.T,
@@ -417,14 +341,40 @@ loading_df = pd.DataFrame(
 
 loading_df["abs_PC1"] = loading_df["PC1"].abs()
 loading_df["abs_PC2"] = loading_df["PC2"].abs()
+loading_df["group"] = loading_df.index.to_series().apply(assign_group)
 
 print("Top features for PC1:")
 print(loading_df.sort_values("abs_PC1", ascending=False).head(15)[["PC1"]])
 print("\nTop features for PC2:")
 print(loading_df.sort_values("abs_PC2", ascending=False).head(15)[["PC2"]])
 
-# Optional: show a compact heatmap-like view of the top contributors
-loading_df.sort_values("abs_PC1", ascending=False).head(10)[["PC1", "PC2"]]
+feature_group_colors = {
+    "movement": "#d95f02",
+    "geometry": "#1b9e77",
+    "other": "#7570b3",
+}
+
+fig, ax = plt.subplots(figsize=(8, 6))
+for group_name, group_data in loading_df.groupby("group", sort=False):
+    ax.scatter(
+        group_data["PC1"],
+        group_data["PC2"],
+        label=group_name.title(),
+        color=feature_group_colors.get(group_name, "#bdbdbd"),
+        alpha=0.75,
+        s=35,
+    )
+
+ax.axhline(0, color="0.7", linewidth=0.8)
+ax.axvline(0, color="0.7", linewidth=0.8)
+ax.set_title("PCA feature loadings coloured by feature group")
+ax.set_xlabel("PC1 loading")
+ax.set_ylabel("PC2 loading")
+ax.legend(frameon=False)
+plt.tight_layout()
+plt.show()
+
+loading_df.sort_values("abs_PC1", ascending=False).head(10)[["PC1", "PC2", "group"]]
 
 # %%
 # Use df_shap_raw to inspect how SHAP values change across the raw feature distribution.
