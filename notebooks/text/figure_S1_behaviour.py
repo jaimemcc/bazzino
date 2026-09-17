@@ -66,7 +66,7 @@ custom_cmap_blue = HEATMAP_CMAP_BLUE  # Use shared colormap
 
 custom_cmap = HEATMAP_CMAP_DIV  # Use shared colormap
 
-SAVE_FIGS = True
+SAVE_FIGS = False
 
 # %% [markdown]
 # ## Load Assembled Data
@@ -268,6 +268,45 @@ plot_snips(snips_dep_10, snips_dep_45, ax, colors[2], colors[3], ylims, yscaleba
 if SAVE_FIGS:
     save_figure_atomic(f, "figS1_snips_movement_deplete", FIGSFOLDER)
 
+# %%
+x_array.columns
+
+# %%
+total_movement = snips_movement[:,50:150].sum(axis=1)  # Sum across the time window for each trial
+
+# %%
+x_array["total_movement"] = snips_movement[:,50:150].sum(axis=1)
+
+# %%
+x_array.columns
+
+# %%
+f, ax = plt.subplots(figsize=(4, 3))
+
+x = x_array["total_movement"]
+y = x_array["simba_median_balance"]
+r, p = stats.pearsonr(x, y)
+p_label = "p<0.001" if p < 0.001 else f"p={p:.3f}"
+
+sns.regplot(x=x, y=y, ax=ax, scatter=False, ci=95,
+            line_kws={"color": "k"})
+
+for pair, color in zip([("replete", "10NaCl"), ("replete", "45NaCl"), ("deplete", "10NaCl"), ("deplete", "45NaCl")], colors):
+    mask = (x_array["condition"] == pair[0]) & (x_array["infusiontype"] == pair[1])
+    ax.scatter(x[mask], y[mask], color=color, s=10, alpha=0.2, label=f"{pair[0]} + {pair[1]}", clip_on=False)
+# ax.scatter(x, y, color="k", s=10, alpha=0.05, clip_on=False)
+
+ax.set_xlim(0, 2000)
+ax.text(1, 0.4, f"r={r:.2f}, {p_label}", transform=ax.transAxes,
+        color="k", fontsize=9, va="top", ha="right")
+
+ax.set_ylim(-1, 1)
+ax.set_yticks([-1, 0, 1])
+ax.set_xlabel("Total movement")
+ax.set_ylabel("SimBA behaviour probability")
+
+sns.despine(offset=5)
+
 
 # %%
 def get_time_moving_by_group(x_array, condition, infusiontype):
@@ -277,6 +316,17 @@ def get_time_moving_by_group(x_array, condition, infusiontype):
         .query("condition == @condition and infusiontype == @infusiontype")
         .groupby("id")
         .time_moving
+        .mean()
+        .values
+    )
+    
+def get_movement_auc_by_group(x_array, condition, infusiontype):
+    
+    return (
+        x_array
+        .query("condition == @condition and infusiontype == @infusiontype")
+        .groupby("id")
+        .movement_auc
         .mean()
         .values
     )

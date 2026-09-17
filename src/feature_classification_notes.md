@@ -101,7 +101,7 @@ features are *not* in `other` — they're already correctly classified as
 Applied to the lowercased full feature name (including any reverse-coding
 suffix), first match wins:
 
-1. Contains `"all_bodyparts"` → `"all body parts"`
+1. Contains `"all_bodyparts"` → `"whole mouse"`
 2. Contains one of (checked in this order): `"nose"`, `"tail_base"`,
    `"head_base"`, `"ear"` → corresponding label (`"nose"`, `"tail base"`,
    `"head base"`, `"ears"`)
@@ -113,8 +113,9 @@ suffix), first match wins:
 `"ears"` label, and `Mouse_Ear_distance` (previously `"whole mouse"`) is now
 also classified as `"ears"`.
 
-Current counts: `whole mouse` = 81, `nose` = 18, `head base` = 17,
-`tail base` = 16, `other` = 16, `ears` = 3, `all body parts` = 2.
+Current counts before combining: `whole mouse` = 81, `nose` = 18, `head base` = 17,
+`tail base` = 16, `other` = 16, `ears` = 3, `all body parts` = 2. After combining,
+`whole mouse` is expected to contain 83 features.
 
 **`other` bodypart currently contains:** the 6 `M1_*_hull*` / `M1_*_hull_deviation`
 distance features, the 5 `Tortuosity_Mouse1_*` features, and the

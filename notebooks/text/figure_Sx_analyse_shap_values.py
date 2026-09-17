@@ -70,7 +70,7 @@ df_shap, df_shap_raw, feature_summary = assemble_shap_dfs(DATAFOLDER)
 # cumul_summary = feature_summary.copy()
 
 # %%
-feature_summary
+feature_summary.bodypart.unique()
 
 
 # %%
@@ -81,8 +81,7 @@ bodypart_colors = {
     "tail base": "#1b9e77",
     "head base": "#7570b3",
     "ears": "#e7298a",
-    "all body parts": "#e6ab02",
-    "whole mouse": "#a6761d",
+    "whole rat": "#a6761d",
     "other": "#bdbdbd",
 }
 bodypart_codes = {name: code for code, name in enumerate(bodypart_colors)}
@@ -174,6 +173,94 @@ for axis in [ax1, ax_window, ax2]:
     axis.set_yticks([])
     
 save_figure_atomic(f, "figSx_cumul_shap_importance", FIGSFOLDER)
+
+# %%
+f, [ax_window, ax_bp, ax] = plt.subplots(
+    figsize=(4, 3),
+    nrows=3,
+    sharex=True,
+    gridspec_kw={"height_ratios": [0.05, 0.05, 1], "hspace": 0.08,
+                 "left": 0.2},
+)
+
+ax_bp.imshow(
+    bodypart_values[None, ::-1],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(list(bodypart_colors.values())),
+    vmin=-0.5,
+    vmax=len(bodypart_colors) - 0.5,
+)
+ax_window.imshow(
+    window_values[None, ::-1],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(window_colors),
+    vmin=-0.5,
+    vmax=len(window_order) - 0.5,
+)
+
+ax_window.text(-0.03, 0.5, "Time window", va="center", ha="right", fontsize=8, transform=ax_window.transAxes)
+ax_bp.text(-0.03, 0.5, "Body part", va="center", ha="right", fontsize=8, transform=ax_bp.transAxes)
+
+for axis in [ax_bp, ax_window]:
+    axis.set_xticks([])
+    axis.set_yticks([])
+    axis.set_ylim(-0.5, 0.5)
+    axis.set_xlim(len(feature_summary) - 0.5, -0.5)
+
+for xtick, row in enumerate(feature_summary.iloc[::-1].itertuples(index=False)):
+    color = {"movement": "red", "geometry": "blue"}.get(row.group, "grey")
+    ax.scatter(
+        xtick,
+        row.cumulative_importance,
+        edgecolors=color,
+        facecolors="w",
+        alpha=0.5,
+        s=30,
+        clip_on=False,
+    )
+    
+ax.set_ylim(0, 1)
+#ax.invert_yaxis()
+
+ax.set_ylabel("Cumulative SHAP importance")
+
+bodypart_legend = [
+    Patch(color=color, label=label)
+    for label, color in bodypart_colors.items()
+]
+bodypart_legend_artist = ax.legend(
+    handles=bodypart_legend,
+    loc="lower right",
+    bbox_to_anchor=(0.8, 0),
+    frameon=False,
+    fontsize=8,
+)
+
+window_legend = [
+    Patch(color=color, label=f"{window} s" if window != "none" else "none")
+    for window, color in zip(window_order, window_colors)
+]
+ax.legend(
+    handles=window_legend,
+    loc="lower right",
+    bbox_to_anchor=(1, 0),
+    frameon=False,
+    fontsize=8,
+)
+ax.add_artist(bodypart_legend_artist)
+
+ax.set_xlabel("Features (in order of importance)")
+ax.set_yticks([0, 1], labels=["0", "1"])
+
+sns.despine(ax=ax_bp, left=True, bottom=True)
+sns.despine(ax=ax_window, left=True, bottom=True)
+sns.despine(ax=ax, offset=5)
+for axis in [ax1, ax_window, ax2]:
+    axis.set_yticks([])
+    
+save_figure_atomic(f, "figS1_cumul_shap_importance", FIGSFOLDER)
 
 # %%
 # Bar + scatter plot comparing signed SHAP importance for movement vs geometry.

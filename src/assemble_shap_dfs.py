@@ -53,7 +53,7 @@ def assign_bodypart(feature: str) -> str:
     """Extract the body-part label encoded in a feature name."""
     feature_lower = feature.lower()
     if "all_bodyparts" in feature_lower:
-        return "all body parts"
+        return "whole rat"
     for key, label in [
         ("nose", "nose"),
         ("tail_base", "tail base"),
@@ -63,7 +63,7 @@ def assign_bodypart(feature: str) -> str:
         if key in feature_lower:
             return label
     if feature_lower.startswith(("mouse_", "mouse1_")) or "total" in feature_lower:
-        return "whole mouse"
+        return "whole rat"
     return "other"
 
 
@@ -195,6 +195,9 @@ def _make_feature_summary(
     feature_summary = feature_summary.sort_values("importance", ascending=False).reset_index(drop=True)
     feature_summary["cumulative_importance"] = (
         feature_summary["importance"].cumsum() / feature_summary["importance"].sum()
+    )
+    feature_summary["reverse_cumulative_importance"] = (
+        1 - feature_summary["cumulative_importance"]
     )
     return feature_summary
 
