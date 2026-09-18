@@ -35,6 +35,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.colors import to_hex
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 import seaborn as sns
 import dill
 from scipy import stats
@@ -269,27 +272,145 @@ if SAVE_FIGS:
     save_figure_atomic(f, "figS1_snips_movement_deplete", FIGSFOLDER)
 
 # %%
-x_array.columns
+from assemble_shap_dfs import assemble_shap_dfs, assign_group
+
+DATAFOLDER = Path("../data/shap_values")
+df_shap, df_shap_raw, feature_summary = assemble_shap_dfs(DATAFOLDER)
 
 # %%
-total_movement = snips_movement[:,50:150].sum(axis=1)  # Sum across the time window for each trial
+feature_summary.shape
+
+# %%
+feature_summary
+
+# %%
+# set colours for strips
+
+bodypart_colors = {
+    "nose": "#d95f02",
+    "tail base": "#1b9e77",
+    "head base": "#7570b3",
+    "ears": "#e7298a",
+    "whole rat": "#a6761d",
+    "other": "#bdbdbd",
+}
+bodypart_codes = {name: code for code, name in enumerate(bodypart_colors)}
+bodypart_values = feature_summary["bodypart"].map(bodypart_codes).to_numpy()
+
+window_order = ["none", "2", "5", "6", "7.5", "10"]
+window_colors = ["#d9d9d9", "#440154", "#31688e", "#35b779", "#90d743", "#fde725"]
+window_codes = {name: code for code, name in enumerate(window_order)}
+window_values = feature_summary["timewindow"].map(window_codes).to_numpy()
+
+# %%
+f, [ax_window, ax_bp, ax] = plt.subplots(
+    figsize=(3.1, 3.8),
+    nrows=3,
+    sharex=True,
+    gridspec_kw={"height_ratios": [0.05, 0.05, 1], "hspace": 0.08,
+                 "left": 0.2, "top": 0.9},
+)
+
+ax_bp.imshow(
+    bodypart_values[None, ::-1],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(list(bodypart_colors.values())),
+    vmin=-0.5,
+    vmax=len(bodypart_colors) - 0.5,
+)
+ax_window.imshow(
+    window_values[None, ::-1],
+    aspect="auto",
+    interpolation="none",
+    cmap=ListedColormap(window_colors),
+    vmin=-0.5,
+    vmax=len(window_order) - 0.5,
+)
+
+ax_window.text(-0.03, 0.5, "Time window", va="center", ha="right", fontsize=8, transform=ax_window.transAxes)
+ax_bp.text(-0.03, 0.5, "Body part", va="center", ha="right", fontsize=8, transform=ax_bp.transAxes)
+
+for axis in [ax_bp, ax_window]:
+    axis.set_xticks([])
+    axis.set_yticks([])
+    axis.set_ylim(-0.5, 0.5)
+    axis.set_xlim(len(feature_summary) - 0.5, -0.5)
+
+for xtick, row in enumerate(feature_summary.iloc[::-1].itertuples(index=False)):
+    color = {"movement": "red", "geometry": "blue"}.get(row.group, "grey")
+    ax.scatter(
+        xtick,
+        row.cumulative_importance,
+        edgecolors=color,
+        facecolors="w",
+        alpha=0.5,
+        s=30,
+        clip_on=False,
+    )
+    
+ax.set_ylim(0, 1)
+#ax.invert_yaxis()
+
+ax.set_ylabel("Cumulative SHAP importance")
+
+bodypart_legend = [
+    Patch(color=color, label=label)
+    for label, color in bodypart_colors.items()
+]
+bodypart_legend_artist = ax.legend(
+    handles=bodypart_legend,
+    loc="lower right",
+    bbox_to_anchor=(0.7, 0),
+    frameon=False,
+    fontsize=8,
+)
+
+window_legend = [
+    Patch(color=color, label=f"{window} s" if window != "none" else "none")
+    for window, color in zip(window_order, window_colors)
+]
+ax.legend(
+    handles=window_legend,
+    loc="lower right",
+    bbox_to_anchor=(1, 0),
+    frameon=False,
+    fontsize=8,
+)
+ax.add_artist(bodypart_legend_artist)
+
+ax.set_xlabel("Features (in order of importance)")
+ax.set_yticks([0, 1], labels=["0", "1"])
+
+sns.despine(ax=ax_bp, left=True, bottom=True)
+sns.despine(ax=ax_window, left=True, bottom=True)
+sns.despine(ax=ax, offset=5)
+for axis in [ax1, ax_window, ax2]:
+    axis.set_yticks([])
+    
+save_figure_atomic(f, "figS1_cumul_shap_importance", FIGSFOLDER)
 
 # %%
 x_array["total_movement"] = snips_movement[:,50:150].sum(axis=1)
 
 # %%
-x_array.columns
-
-# %%
-f, ax = plt.subplots(figsize=(4, 3))
+f, ax = plt.subplots(figsize=(3, 3),
+                     gridspec_kw={"bottom": 0.25})
 
 x = x_array["total_movement"]
 y = x_array["simba_median_balance"]
-r, p = stats.pearsonr(x, y)
+rho, p = stats.spearmanr(x, y)
 p_label = "p<0.001" if p < 0.001 else f"p={p:.3f}"
 
-sns.regplot(x=x, y=y, ax=ax, scatter=False, ci=95,
-            line_kws={"color": "k"})
+CORRELATION_FIT = "lowess"  # Choose: "linear", "lowess", or "none"
+if CORRELATION_FIT == "linear":
+    sns.regplot(x=x, y=y, ax=ax, scatter=False, ci=95,
+                line_kws={"color": "k"})
+elif CORRELATION_FIT == "lowess":
+    sns.regplot(x=x, y=y, ax=ax, scatter=False, lowess=True, ci=95,
+                line_kws={"color": "k"})
+elif CORRELATION_FIT != "none":
+    raise ValueError("CORRELATION_FIT must be 'linear', 'lowess', or 'none'")
 
 for pair, color in zip([("replete", "10NaCl"), ("replete", "45NaCl"), ("deplete", "10NaCl"), ("deplete", "45NaCl")], colors):
     mask = (x_array["condition"] == pair[0]) & (x_array["infusiontype"] == pair[1])
@@ -297,15 +418,17 @@ for pair, color in zip([("replete", "10NaCl"), ("replete", "45NaCl"), ("deplete"
 # ax.scatter(x, y, color="k", s=10, alpha=0.05, clip_on=False)
 
 ax.set_xlim(0, 2000)
-ax.text(1, 0.4, f"r={r:.2f}, {p_label}", transform=ax.transAxes,
+ax.text(1, 0.4, f"rho={rho:.2f}, {p_label}", transform=ax.transAxes,
         color="k", fontsize=9, va="top", ha="right")
 
 ax.set_ylim(-1, 1)
 ax.set_yticks([-1, 0, 1])
-ax.set_xlabel("Total movement")
+ax.set_xlabel("Cumulative mean body-part displacement\n(mm over 10 s)")
 ax.set_ylabel("SimBA behaviour probability")
 
 sns.despine(offset=5)
+
+save_figure_atomic(f, "figS1_correlation_movement_simba", FIGSFOLDER)
 
 
 # %%

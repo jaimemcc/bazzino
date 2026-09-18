@@ -65,9 +65,6 @@ from assemble_shap_dfs import assemble_shap_dfs, assign_group
 DATAFOLDER = Path("../data/shap_values")
 df_shap, df_shap_raw, feature_summary = assemble_shap_dfs(DATAFOLDER)
 
-# Compatibility views used by the exploratory plots below.
-# feature_groups = feature_summary[["feature", "importance", "group"]].copy()
-# cumul_summary = feature_summary.copy()
 
 # %%
 feature_summary.bodypart.unique()
