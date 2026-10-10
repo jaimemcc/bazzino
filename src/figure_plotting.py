@@ -733,7 +733,7 @@ def make_correlation_plot_simba_1group(inf, color, yaxis=False, fit="linear", re
     sns.despine(ax=ax, offset=2)
     
     if yaxis:
-        ax.set_ylabel("Appetitive Probability")
+        ax.set_ylabel("Valence index")
         
     if simba_metric == "zscore":
         ax.set_ylim([-0.12, 0.2])
@@ -1310,9 +1310,9 @@ def make_realignment_panel_only_one_parameter(data_for_figure, trial_col, column
     df_realigned = data_for_figure["df_realigned"]
     
     if parameter_key == "behav":
-        ylabel = 'App. behaviour'
+        ylabel = 'Valence index'
     else:  # Default to dopamine
-        ylabel = 'Dopamine AUC'
+        ylabel = 'Dopamine (AUC)'
 
 
     plot_auc_and_sigmoid(df_orig, "trial", column_to_plot, ax=ax[0], include_steepness=False, color=color,

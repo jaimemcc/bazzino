@@ -190,7 +190,7 @@ deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "de
 deplete_450_mean, deplete_450_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "45NaCl", "simba_median_balance")
 
 f, ax = make_trial_and_nacl_plot(x_vals_100, deplete_100_mean, deplete_100_sem, x_vals_450, deplete_450_mean, deplete_450_sem, colors=colors)
-ax[0].set_ylabel("Appetitive behaviour")
+ax[0].set_ylabel("Valence index")
 save_figure_atomic(f, "fig5_nacl_behav", FIGSFOLDER)
 
 deplete_100_mean, deplete_100_sem = make_auc_and_sem_data_per_trial(x_array, "deplete", "10NaCl", "auc_snips")

@@ -198,7 +198,7 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_da, SIMBA_COLUMN,
                              color=BEHAV_COLOR)
 
 ax.set_yticks([ -0.5, 0, 0.5, 1])
-ax.set_ylabel("App. behaviour")
+ax.set_ylabel("Valence index")
 ax.set_xticks([-5, 0, 5], ["-2", "+3", "+8"])
 ax.axvline(-3, color="gray", linestyle="--", alpha=0.5)
 
@@ -221,7 +221,7 @@ f, ax, slopes =make_realignment_slope_panel(data_for_figure_to_behav, DA_COLUMN,
 
 
 # ax.set_yticks([-0.5, 0, 0.5, 1])
-ax.set_ylabel("Dopamine AUC")
+ax.set_ylabel("Dopamine (AUC)")
 ax.set_xticks([-5, 0, 5], ["-8", "-3", "+2"])
 ax.axvline(3, color="gray", linestyle=":", alpha=0.5)
 ax.set_ylim([np.float64(-8.289015319171442), np.float64(15.032973623363642)])

@@ -279,12 +279,7 @@ def get_auc_and_sex_by_group(x_array, condition, infusiontype, simba_col="mean_s
     sex_vals = grouped["sex"].fillna("Unknown").to_numpy()
     return auc_vals, sex_vals
 
-if SIMBA_METRIC == "zscore":
-    ylabel = "Appetitive Probability\n(Z-scored, all trials)"
-elif SIMBA_METRIC == "median":
-    ylabel = "Appetitive Probability\n(\u0394 from baseline)"
-else:
-    ylabel = "Appetitive Probability\n(Mean, all trials)"
+ylabel = "Mean valence Index"
 
 # Organize AUCs by condition
 replete_10_auc, replete_10_sex = get_auc_and_sex_by_group(x_array, "replete", "10NaCl", simba_col=simba_col)
