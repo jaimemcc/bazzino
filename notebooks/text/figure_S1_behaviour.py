@@ -300,7 +300,14 @@ bodypart_values = feature_summary["bodypart"].map(bodypart_codes).to_numpy()
 window_order = ["none", "2", "5", "6", "7.5", "10"]
 window_colors = ["#d9d9d9", "#440154", "#31688e", "#35b779", "#90d743", "#fde725"]
 window_codes = {name: code for code, name in enumerate(window_order)}
-window_values = feature_summary["timewindow"].map(window_codes).to_numpy()
+window_values = feature_summary["timewindow"].map(window_codes).to_numpy()  # unchanged
+
+# window sizes are frame counts at 10 fps; 7.5 is truncated to 7 frames by the extractor
+window_seconds = {"none": "none", "2": "0.2 s", "5": "0.5 s", "6": "0.6 s", "7.5": "0.7 s", "10": "1.0 s"}
+
+
+# %%
+feature_summary["timewindow"].unique()
 
 # %%
 f, [ax_window, ax_bp, ax] = plt.subplots(
@@ -367,7 +374,7 @@ bodypart_legend_artist = ax.legend(
 )
 
 window_legend = [
-    Patch(color=color, label=f"{window} s" if window != "none" else "none")
+    Patch(color=color, label=window_seconds[window])
     for window, color in zip(window_order, window_colors)
 ]
 ax.legend(
