@@ -443,8 +443,7 @@ f, ax = plt.subplots(figsize=(3, 3),
 
 x = x_array["total_movement"]
 y = x_array["simba_median_balance"]
-r, p = stats.pearsonr(x, y)
-p_label = "p<0.001" if p < 0.001 else f"p={p:.3f}"
+
 
 x = np.log10(x)  # Apply log transformation to y-axis data
 
@@ -461,12 +460,6 @@ elif CORRELATION_FIT != "none":
 for pair, color in zip([("replete", "10NaCl"), ("replete", "45NaCl"), ("deplete", "10NaCl"), ("deplete", "45NaCl")], colors):
     mask = (x_array["condition"] == pair[0]) & (x_array["infusiontype"] == pair[1])
     ax.scatter(x[mask], y[mask], color=color, s=10, alpha=0.2, label=f"{pair[0]} + {pair[1]}", clip_on=False)
-# ax.scatter(x, y, color="k", s=10, alpha=0.05, clip_on=False)
-
-
-
-ax.text(1, 0.4, f"r={r:.2f}, {p_label}", transform=ax.transAxes,
-        color="k", fontsize=9, va="top", ha="right")
 
 ax.set_ylim(-1, 1)
 ax.set_yticks([-1, 0, 1])
@@ -477,6 +470,21 @@ ax.set_ylabel("SimBA behaviour probability")
 ax.set_xticks([2, 3, 4], labels=["0.1", "1", "10"])  # Set x-ticks for log scale
 
 sns.despine(offset=5)
+
+
+r, p = stats.pearsonr(x, y)
+p_label = "p<0.001" if p < 0.001 else f"p={p:.3f}"
+print("Pearson correlation:", r, p, p_label)
+
+rho, p = stats.spearmanr(x, y)
+p_label_spearman = "p<0.001" if p < 0.001 else f"p={p:.3f}"
+print("Spearman correlation:", rho, p, p_label_spearman)
+
+ax.text(1, 0.5, f"r={r:.2f}, {p_label}", transform=ax.transAxes,
+        color="k", fontsize=9, va="top", ha="right")
+
+ax.text(1, 0.4, f"ρ={rho:.2f}, {p_label_spearman}", transform=ax.transAxes,
+        color="k", fontsize=9, va="top", ha="right")
 
 save_figure_atomic(f, "figS1_correlation_movement_simba_logaxis", FIGSFOLDER)
 
