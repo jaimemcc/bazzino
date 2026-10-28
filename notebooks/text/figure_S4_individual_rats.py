@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
 #   kernelspec:
-#     display_name: default
+#     display_name: notebook-project:default (3.12.13)
 #     language: python
 #     name: python3
 # ---
@@ -246,6 +246,88 @@ if SAVE_FIGS:
     save_figure_atomic(f, "figS4_individual_rats", FIGSFOLDER)
 
 
+
+# %%
+## Representative figure for talk - only including 3 rats
+
+snips_to_plot = np.array(smooth_array(snips_simba))
+vlim_behav = (-1, 1)
+vlim_photo = (-1, 1)
+rats = x_array.query("infusiontype == '45NaCl'").id.unique()
+
+f, ax = plt.subplots(ncols=5, nrows=3, figsize=(7,4),
+                     gridspec_kw={"width_ratios": [1, 1, 0.2, 1, 1],
+                                  "wspace": 0.6, "bottom": 0.15, "top": 0.95,
+                                  "left": 0.1, "right": 0.95},
+                                  )    
+
+
+
+for idx, rat in enumerate([rats[i] for i in [0,2,8]]):
+    behav_data = snips_simba[x_array.query("id == @rat and condition == 'deplete'").index, :]
+    photo_data = snips_photo[x_array.query("id == @rat and condition == 'deplete'").index, :]
+
+    simba_median = x_array.query("id == @rat and condition == 'deplete'").simba_median_balance.values
+    auc_da = x_array.query("id == @rat and condition == 'deplete'").auc_snips.values
+    da_norm = norm_signal(auc_da, smooth=True)
+    
+    behav_transition = x_array.query("id == @rat and condition == 'deplete' and realigned_trials_behav == 0").trial.values[0]
+    da_transition = x_array.query("id == @rat and condition == 'deplete' and realigned_trials_da == 0").trial.values[0]
+    print(f"Rat {rat} behav transition: {behav_transition}; DA transition: {da_transition}")
+
+    vlim_behav = scale_vlim_to_data(behav_data, percentile=90)
+    vlim_photo = scale_vlim_to_data(photo_data, percentile=90)
+
+    hm = sns.heatmap(behav_data, ax=ax[idx, 0], cmap=custom_cmap,
+                    vmin=vlim_behav[0], vmax=vlim_behav[1],
+                    cbar=False
+                    )
+    hm.collections[0].set_rasterized(True)
+    ax[idx, 0].set_yticks([0, 25, 49], labels=["0", rat, "49"], rotation=0)
+    ax[idx, 0].set_xticks([])
+    ax[idx, 0].scatter(200, behav_transition, color="k", marker="<", s=50, zorder=5, clip_on=False)
+
+
+    ax[idx, 1].plot(gaussian_filter1d(simba_median, sigma=1), color=colors[3])
+    ax[idx, 1].set_ylim(-1.05, 1.05)
+    ax[idx, 1].axvline(behav_transition, color="k", linestyle=":", alpha=0.5)
+
+    hm = sns.heatmap(photo_data, ax=ax[idx, 3], cmap=custom_cmap,
+                vmin=vlim_photo[0], vmax=vlim_photo[1],
+                cbar=False
+                )
+    hm.collections[0].set_rasterized(True)
+    ax[idx, 3].set_yticks([0, 49], labels=["0", "49"], rotation=0)
+    ax[idx, 3].set_xticks([])
+    ax[idx, 3].scatter(200, da_transition, color="k", marker="<", s=50, zorder=5, clip_on=False)
+
+    ax[idx, 4].plot(da_norm, color=colors[3])
+    ax[idx, 4].axvline(da_transition, color="k", linestyle="--", alpha=0.5)
+
+    for axis in [ax[idx, 1], ax[idx, 4]]:
+        sns.despine(ax=axis, offset=5)
+        axis.set_xticks([])
+
+    ax[idx, 2].axis("off")
+
+ax[0, 0].plot((49, 148), (-4, -4), color="k", linewidth=2, alpha=0.3, clip_on=False)
+ax[0, 3].plot((49, 148), (-4, -4), color="k", linewidth=2, alpha=0.3, clip_on=False)
+
+ax[2, 0].plot((149, 198), (-54, -54), color="k", linewidth=2, alpha=0.3, clip_on=False)
+ax[2, 3].plot((149, 198), (-54, -54), color="k", linewidth=2, alpha=0.3, clip_on=False)
+
+ax[2, 1].set_xticks([0,49])
+ax[2, 4].set_xticks([0,49])
+ax[2, 1].set_xlabel("Trials")
+ax[2, 4].set_xlabel("Trials")
+
+if SAVE_FIGS:
+    save_figure_atomic(f, "figSx_three_rep_rats", FIGSFOLDER)
+
+
+
+# %%
+rats[0,2,8]
 
 # %%
 # possible rats 3, 7, 8, 0

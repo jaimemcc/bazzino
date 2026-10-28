@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
 #   kernelspec:
-#     display_name: default
+#     display_name: notebook-project:default (3.12.13)
 #     language: python
 #     name: python3
 # ---
