@@ -191,3 +191,9 @@ data/PB*
 
 # Notebook workflow local state
 .notebook_workflow_state.json
+
+# Private / regenerable
+data/_cache_*.pickle
+data/assembled_data.pickle
+*.afdesign
+.notebook_workflow_state.json
