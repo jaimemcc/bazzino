@@ -11,6 +11,8 @@
 - `extract_simba` and `hybrid_feature_extractor` may be used by `assemble_all_data` (the pipeline from raw data). Check before deleting.
 - `make_snipped_videos` is out (decided). The rest need a keep/remove decision, in particular `color_schemes`, `find_folders_without_avis`, `plots_for_spectral`, `validate_cam1_timestamps` (hard-coded `C:/Users/jmc010/...` tank path).
 
+**Resolved:** keep all of these (used by other parts of the project) and document each in `src/README.md`. `make_snipped_videos` stays out.
+
 ## Packaging
 - `setup.cfg` lists `py_modules` (a flat install of `src/`). `pyproject.toml` has the jupytext setting (not needed once `.py` copies are removed). Notebooks import with `sys.path.insert(0, "../src")`, so the package install is probably unnecessary. Confirm with `pixi.toml` before removing.
 

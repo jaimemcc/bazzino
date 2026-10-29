@@ -5,6 +5,8 @@
 - **Data in repo**: everything in `data/` except the caches (`_cache_*.pickle`). Raw data is not in the repo; it is kept locally and uploaded to Zenodo. A download script is wanted.
 - **Out**: `make_snipped_videos` (notebook and `src/` script), `tmp_shap_analysis.py`, `notebooks/text/*.py`, `tooling/notebook_workflow/`, `setup_notebook_workflow.py`, `update_notebook_workflow.py`, `notebook_workflow_config.json`, the notebook-workflow tasks in `pixi.toml`, `paper/paper.*`, `paper/todo_list.md`, `.afdesign`.
 - **Data format**: switch from pickle to parquet/npz/JSON (see 05). This is the one code change before release.
+- **Kept scripts**: the `src/` scripts not imported by notebooks (`add_target_columns`, `extract_simba`, `filter_dlc_bodyparts`, `find_folders_without_avis`, `hybrid_feature_extractor`, `plots_for_spectral`, `validate_cam1_timestamps`, `color_schemes`) stay because other parts of the project use them. Each must be documented in `src/README.md` (purpose, inputs, usage). Personal paths in them still get removed. `make_snipped_videos` stays out, as decided earlier.
+- **Figures**: remove `FigS5_optimal_lag.png` and the three `FigSx_*.png` files (FR1_offset, Prog_offset, epochs). Keep Fig1-5, FigS1-S4, `FigS5_transition_correlations.png` and `FigS6_trimmed_NaCl.png`. Rename `Fig5_NaCl integration.png` to remove the space.
 - **In**: the figure notebooks including the `Sx` ones (with outputs kept), final figures in `paper/figs/`, `LICENSE` (unchanged).
 - **To add**: README (citation, DOI, environment setup, per-figure reproduction), `CITATION.cff`, a Zenodo download script.
 - **Environment**: pixi only; remove `setup.cfg` and `bazzino.egg-info` if unneeded.

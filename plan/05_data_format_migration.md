@@ -31,6 +31,14 @@ data/assembled/
 - **Other readers:** `src/plots_for_spectral.py` uses `pickle`; `figure_Sx_analyse_shap_values` imports dill. Check what they load.
 - **Writer:** `src/assemble_all_data.py` line ~1805 (`dill.dump(output, f)`) must write the new format (and, for a while, optionally the old one for comparison).
 
+## Status (step 1 and 2 done)
+- `src/data_io.py` written (`save_assembled` / `load_assembled`); `pyarrow` added to `pixi.toml`.
+- The current pickle converted to `data/assembled/` (left untracked on purpose: the folder goes into the new repo, there is no point adding another 20 MB to the old repo's history).
+- Round trip verified for all 20 keys (the two keys missing from earlier notes are `behav_stats`, a dict of 48 small dicts stored as JSON, and `snips_movement_raw`, an array). Arrays are bit-identical, DataFrames equal in values, dtypes, columns and index, `metadata` and `behav_stats` are equal.
+- Known, harmless differences: (a) the five absolute paths in `params` are replaced by a placeholder; (b) string columns come back with pyarrow-backed `string` dtype instead of the python-backed one the old pickle had (same `<NA>` behaviour); (c) the old pickle's column-name index had a legacy string dtype, the new one has the pandas 3 default.
+- Size: 19.7 MB vs 25.6 MB for the pickle.
+- Still to do: a repo test for `data_io` using synthetic data, switch `assemble_all_data.py` (line ~1805) to write the new format, switch the 11 notebooks to `load_assembled`, re-run and compare figures, remove `pickle_compat.py`.
+
 ## Plan
 1. Write `src/data_io.py`, plus a test that converts the current pickle and checks the round trip.
 2. Convert the pickle with it and check the result.
