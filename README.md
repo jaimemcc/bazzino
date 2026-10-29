@@ -1,35 +1,70 @@
-# bazzino
-Analysis of data in sodium appetite experiment by Bazzino et al. Preprint available at:
-https://www.biorxiv.org/content/10.64898/2026.07.16.738888v1
+# bazzino-paper
 
-## Data processing
-The analysis uses photometry data and head position/movement data.
+Code and data for the figures in:
 
-Photometry data were assembled by reading in TDT files with assemble_data.ipynb, extracting "snips" of each trial aligned with solenoid onset.
-Data were saved as .pickle files that included an accompanying "x" array describing chaacteristics of each trial.
+> Bazzino & Roitman (2026). *TITLE TODO*. bioRxiv. https://doi.org/10.64898/2026.07.16.738888
 
-After assembling photometry and DLC data, important to run, equalize_data notebook to ensure trials match up and to save final data .pickle file for all further analysis
-## Setup on a New Machine
+Fibre photometry of dopamine and SimBA-classified behaviour during sodium appetite experiments.
 
-### Initial Setup
-When you first clone this repository on a new machine, run:
+- Archived data and code: Zenodo DOI **TODO**
+- Cite this work: see [CITATION.cff](CITATION.cff)
 
-```bash
-pixi install
+## Quick start
+
+1. Install [pixi](https://pixi.sh), then in this folder run:
+   ```
+   pixi install
+   ```
+2. The processed data needed for every figure is in `data/assembled/` (parquet, npz, json).
+3. Open a notebook and run it top to bottom:
+   ```
+   pixi run jupyter lab
+   ```
+   Notebooks write panels to `paper/figs/panels/` and statistics tables to `results/`.
+
+Run the tests with `pixi run test`.
+
+## Notebooks to figures
+
+| Notebook | Figure |
+|---|---|
+| `notebooks/figure_1_behaviour_simba.ipynb` | Fig. 1 |
+| `notebooks/figure_2_photometry.ipynb` | Fig. 2 |
+| `notebooks/figure_3_crosscorrelation.ipynb` | Fig. 3 |
+| `notebooks/figure_4_realignment.ipynb` | Fig. 4 |
+| `notebooks/figure_5_plotted_by_NaCl.ipynb` | Fig. 5 |
+| `notebooks/figure_S1_behaviour.ipynb` | Fig. S1 |
+| `notebooks/figure_S2_and_S3_ratbyrat_heatmaps.ipynb` | Figs. S2, S3 |
+| `notebooks/figure_S4_individual_rats.ipynb` | Fig. S4 |
+| `notebooks/figure_Sx_individual_transitions.ipynb` | Individual transitions (supplement) |
+
+Notebook outputs are saved, so figures can be viewed on GitHub without running anything.
+Final composed figures are in `paper/figs/`.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `notebooks/` | One notebook per figure |
+| `src/` | Pipeline and helper code, see [src/README.md](src/README.md) |
+| `data/assembled/` | Processed dataset used by the notebooks |
+| `data/*.csv`, `data/shap_values/` | File keys, subject keys, TTLs and SHAP outputs |
+| `results/` | Statistics tables exported for JASP |
+| `paper/figs/` | Final figures |
+| `tests/` | Tests for the data I/O module |
+
+## Rebuilding the processed data from raw data (optional)
+
+Raw recordings (TDT tanks, DeepLabCut CSVs, SimBA predictions) are on Zenodo (DOI **TODO**).
+Download and extract them, set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
+(defaults: `raw_data/tanks`, `raw_data/dlc`, `raw_data/simba`), then run:
+
+```
+pixi run python src/assemble_all_data.py
 ```
 
-This installs all dependencies, including `nbstripout` which is used to strip notebook outputs from git commits.
+This rewrites `data/assembled/` and creates private caches (`data/_cache_*.pickle`, git-ignored).
 
-### Configure nbstripout with Git
-After the initial pixi install, configure the git filter for nbstripout:
+## License
 
-```bash
-pixi run nbstripout --install --attributes .gitattributes
-git config filter.nbstripout.clean "pixi run nbstripout --keep-metadata-keys metadata.kernelspec\\ metadata.language_info"
-git config diff.ipynb.textconv "pixi run nbstripout -t"
-```
-
-This one-time setup configures git to automatically strip notebook outputs while preserving kernel metadata (`metadata.kernelspec` and `metadata.language_info`) so VS Code can restore notebook kernels more reliably across machines.
-
-**Why is this needed?**
-The git filter configuration is stored in `.git/config` which is not version-controlled. Each machine needs to configure it locally. Without this, you'll see notebooks showing as modified even after syncing with the remote.
+See [LICENSE](LICENSE).
