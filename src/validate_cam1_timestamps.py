@@ -21,7 +21,7 @@ import pandas as pd
 import tdt
 
 
-DEFAULT_TANK_FOLDER = Path("C:/Users/jmc010/Data/bazzino/tanks")
+DEFAULT_TANK_FOLDER = Path("raw_data/tanks")
 DEFAULT_DATA_FOLDER = Path("data")
 DEFAULT_FILEKEY = "10NaCl_FileKey.csv"
 DEFAULT_RESULTS_FOLDER = Path("results")

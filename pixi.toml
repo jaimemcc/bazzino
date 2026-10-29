@@ -38,6 +38,7 @@ python-dateutil = ">=2.9.0.post0,<3"
 six = ">=1.17.0,<2"
 pingouin = ">=0.6.1,<0.7"
 pyarrow = ">=15"
+pytest = ">=9.2.0,<10"
 
 [pypi-dependencies]
 tdt = ">=0.7.3, <0.8"

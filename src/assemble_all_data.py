@@ -11,10 +11,17 @@ This script runs the full data pipeline:
     6. Sigmoidal transition fitting (deplete + 45NaCl only)
         7. Combine behaviour and photometry x_arrays, realign trials
 
-Outputs a single pickle: data/assembled_data.pickle
+Outputs a folder of portable files, data/assembled/ (written by
+data_io.save_assembled, read with data_io.load_assembled):
+    arrays.npz      snips_* arrays and pca_transformed
+    *.parquet       x_array, fits_df*, z_dep45
+    *.json          metadata, params, behav_stats
 containing: x_array, snips_photo, snips_simba_zscore,
             snips_simba_shifted_baseline, snips_simba_raw,
             snips_movement, fits_df, fits_df_da, fits_df_behav, z_dep45
+
+The intermediate caches (data/_cache_*.pickle) are private, regenerable
+dill pickles and are not part of the shared data.
 
 Usage:
     python src/assemble_all_data.py
@@ -46,6 +53,7 @@ from sklearn.metrics import silhouette_score
 # Add src to path so we can import local modules
 SRC_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC_DIR))
+from data_io import save_assembled
 from extract_behav_parameters import (
     get_ttls, read_DLC_csv, interpolate_low_likehood,
     calc_bodypart_movement, calc_angular_velocity,
@@ -72,14 +80,12 @@ from model_fit_helpers import (
 # ──────────────────────────────────────────────────────────────────────
 PARAMS = {
     # ── Paths ──
+    # Point these at your copy of the raw data (see README: Zenodo download).
     "data_folder": Path("data"),
     "results_folder": Path("results"),
-    "tank_folder": Path("D:/TestData/bazzino/from_paula"),
-    #"tank_folder": Path("C:/Users/jmc010/Data/bazzino/tanks"), #laptop
-    "dlc_folder": Path("D:/TestData/bazzino/output_csv_shuffle4"), #office
-    # "dlc_folder": Path("C:/Users/jmc010/Data/bazzino/Output DLC shuffle 4 csv files"), #laptop
-    "simba_folder": Path("D:/TestData/bazzino/simba_preds/Output_all_animals_appetitive"), #office
-    # "simba_folder": Path("C:/Users/jmc010/Data/bazzino/simba"), #laptop
+    "tank_folder": Path("raw_data/tanks"),
+    "dlc_folder": Path("raw_data/dlc"),
+    "simba_folder": Path("raw_data/simba"),
 
     # ── Behavioural metric ──
     # NOTE: Both movement and angular_velocity are now always calculated
@@ -179,7 +185,8 @@ PARAMS = {
     "behavior_velocity_smoothing_window": 5,
 
     # ── Output ──
-    "output_filename": "assembled_data.pickle",
+    # Folder (inside data_folder) written by data_io.save_assembled()
+    "output_folder": "assembled",
 
     # ── Caching ──
     # Set these to True to load from cached pickle instead of re-extracting.
@@ -1800,9 +1807,8 @@ def run_pipeline(params=None):
     if snips_movement_raw is not None:
         output["snips_movement_raw"] = snips_movement_raw
 
-    output_path = params["data_folder"] / params["output_filename"]
-    with open(output_path, "wb") as f:
-        dill.dump(output, f)
+    output_path = params["data_folder"] / params["output_folder"]
+    save_assembled(output, output_path)
 
     print("\n" + "=" * 60)
     print(f"DONE! Saved to {output_path}")
