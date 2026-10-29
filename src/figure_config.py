@@ -5,17 +5,26 @@ This module contains shared settings used across all figure notebooks to ensure
 consistency in colors, paths, and styling.
 """
 
+import warnings
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from color_schemes import (
     ACTIVE_COLOR_SCHEME_NAME,
     GROUP_ORDER,
     get_color_scheme,
     make_diverging_colormap,
 )
+
+# Known, expected statsmodels notes from the mixed models (singular random-effects
+# covariance with few animals; wald_test API notice). Silenced so they do not clutter
+# notebook outputs, which would also show machine-specific library paths.
+warnings.filterwarnings("ignore", module=r"statsmodels\.regression\.mixed_linear_model")
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"statsmodels\.base\.model")
 
 # ──────────────────────────────────────────────────────────────────────
 # Matplotlib Configuration

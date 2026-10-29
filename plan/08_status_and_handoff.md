@@ -48,3 +48,4 @@ Target: new repo `mccutcheonlab/bazzino-paper`, one fresh commit.
 
 ## Addendum
 - Unused imports pruned from all 9 notebooks (AST check across all cells; re-executed clean). Scripts in session files/: unused_imports.py (report), prune_imports.py (apply). If notebooks are edited again, re-run the report.
+- Notebook outputs no longer carry absolute paths: jasp CSV prints are repo-relative, and expected statsmodels warnings are silenced in src/figure_config.py. Re-running in VS Code should stay clean; still grep tracked content for 'jmc010' before the final cut.
