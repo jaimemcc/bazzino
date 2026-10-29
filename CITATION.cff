@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this code or data, please cite the paper below (update to the journal reference once published)."
+title: "Rapidly decreasing phasic dopamine responses precede a valence switch during satiation of sodium appetite"
+type: dataset
+authors:
+  - family-names: Bazzino
+    given-names: Paula
+    affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
+  - family-names: Russchen
+    given-names: Dionne C. R.
+    affiliation: "UiT The Arctic University of Norway, Tromsø, Norway"
+  - family-names: Keinath
+    given-names: Alexandra T.
+    affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
+  - family-names: Roitman
+    given-names: Mitchell F.
+    affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
+  - family-names: McCutcheon
+    given-names: James E.
+    affiliation: "UiT The Arctic University of Norway, Tromsø, Norway"
+doi: 10.5281/zenodo.21394487
+repository-code: "https://github.com/mccutcheonlab/bazzino-paper"
+license: See LICENSE
+preferred-citation:
+  type: article
+  title: "Rapidly decreasing phasic dopamine responses precede a valence switch during satiation of sodium appetite"
+  authors:
+    - family-names: Bazzino
+      given-names: Paula
+    - family-names: Russchen
+      given-names: Dionne C. R.
+    - family-names: Keinath
+      given-names: Alexandra T.
+    - family-names: Roitman
+      given-names: Mitchell F.
+    - family-names: McCutcheon
+      given-names: James E.
+  journal: bioRxiv
+  doi: 10.64898/2026.07.16.738888
+  year: 2026

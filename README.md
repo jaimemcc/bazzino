@@ -2,7 +2,7 @@
 
 Code and data for the figures in:
 
-> Bazzino & Roitman (2026). *TITLE TODO*. bioRxiv. https://doi.org/10.64898/2026.07.16.738888
+> Bazzino P, Russchen DCR, Keinath AT*, Roitman MF*, McCutcheon JE*. (2026). *Rapidly decreasing phasic dopamine responses precede a valence switch during satiation of sodium appetite*. bioRxiv (preprint; update on acceptance). https://doi.org/10.64898/2026.07.16.738888
 
 Fibre photometry of dopamine and SimBA-classified behaviour during sodium appetite experiments.
 
