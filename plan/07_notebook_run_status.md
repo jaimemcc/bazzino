@@ -8,7 +8,7 @@ Control: the same notebooks with the old pickle loader gave identical error list
 | `figure_1_behaviour_simba` | 3 errors (cells 33, 35, 42, `NameError`) | `rats` is never defined before the per-rat time-series cells. The saved outputs came from an older run state. |
 | `figure_2_photometry` | clean | |
 | `figure_3_crosscorrelation` | clean | |
-| `figure_4_realignment` | 29 errors, first at cell 15 (`KeyError: 'k_da_orig'`), the rest follow from it | The notebook has the `k_da_orig` line commented out, while `src/figure_plotting.py` (line 1237) still reads it. One of the two is out of date. Needs a decision on which is right before release. |
+| `figure_4_realignment` | cells 0-13 run clean; all 29 errors are in cells 15-68, below the author's own heading "Old stuff below here" (cell 14) | Cells 15+ still use the removed sigmoid `k_da_orig` / `fits_df` fits. Recommendation: cut everything from cell 14 on, once it is confirmed that no panel in the paper (e.g. the 4D shuffle control) comes only from those cells. Not a `src/` bug: `figure_plotting.make_realignment_panel_behav_and_da` is only called by the old cells. |
 | `figure_5_plotted_by_NaCl` | clean | |
 | `figure_S1_behaviour` | 6 errors (cells 33, 35-39, `NameError`) | Same kind of problem as `figure_1`; probably the end-of-notebook prototype cells. |
 | `figure_S2_and_S3_ratbyrat_heatmaps` | clean | |
