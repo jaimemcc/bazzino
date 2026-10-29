@@ -44,6 +44,18 @@ def _sanitise(obj):
     return obj
 
 
+def _use_python_strings(df):
+    """Return string columns with python-backed storage.
+
+    The analysis was developed with python-backed strings. pandas 3 switches to
+    pyarrow-backed strings when pyarrow is installed (needed for parquet), and
+    those do not support some numpy-style indexing the notebooks rely on.
+    """
+    py_str = pd.StringDtype("python", na_value=pd.NA)
+    cols = [c for c in df.columns if isinstance(df[c].dtype, pd.StringDtype)]
+    return df.astype({c: py_str for c in cols}) if cols else df
+
+
 def save_assembled(data, folder):
     """Write `data` (dict of arrays, DataFrames and plain dicts) to `folder`."""
     folder = Path(folder)
@@ -86,7 +98,7 @@ def load_assembled(folder):
             if meta["kind"] == "array":
                 data[key] = npz[key]
             elif meta["kind"] == "dataframe":
-                data[key] = pd.read_parquet(folder / meta["file"])
+                data[key] = _use_python_strings(pd.read_parquet(folder / meta["file"]))
             else:
                 with open(folder / meta["file"], encoding="utf-8") as f:
                     data[key] = json.load(f)
