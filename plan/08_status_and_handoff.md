@@ -45,3 +45,6 @@ Target: new repo `mccutcheonlab/bazzino-paper`, one fresh commit.
 5. Phase 6: export the tree with `git archive` (tracked files) plus `data/assembled/`, into a new directory; `git init`; one commit; check size and that no caches/`.afdesign` are present; push to `mccutcheonlab/bazzino-paper`.
 6. Phase 7: fresh clone, `pixi install`, `pixi run test`, run notebooks.
 7. Phase 8: tag, update the Zenodo record to link the code, archive the old repo, update citation after acceptance.
+
+## Addendum
+- Unused imports pruned from all 9 notebooks (AST check across all cells; re-executed clean). Scripts in session files/: unused_imports.py (report), prune_imports.py (apply). If notebooks are edited again, re-run the report.
