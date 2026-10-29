@@ -6,7 +6,7 @@ Code and data for the figures in:
 
 Fibre photometry of dopamine and SimBA-classified behaviour during sodium appetite experiments.
 
-- Archived data and code: Zenodo DOI **TODO**
+- Archived data and code: Zenodo DOI [10.5281/zenodo.21394487](https://doi.org/10.5281/zenodo.21394487)
 - Cite this work: see [CITATION.cff](CITATION.cff)
 
 ## Quick start
@@ -36,7 +36,7 @@ Run the tests with `pixi run test`.
 | `notebooks/figure_S1_behaviour.ipynb` | Fig. S1 |
 | `notebooks/figure_S2_and_S3_ratbyrat_heatmaps.ipynb` | Figs. S2, S3 |
 | `notebooks/figure_S4_individual_rats.ipynb` | Fig. S4 |
-| `notebooks/figure_Sx_individual_transitions.ipynb` | Individual transitions (supplement) |
+| `notebooks/figure_S5_individual_transitions.ipynb` | Fig. S5 |
 
 Notebook outputs are saved, so figures can be viewed on GitHub without running anything.
 Final composed figures are in `paper/figs/`.
@@ -55,7 +55,7 @@ Final composed figures are in `paper/figs/`.
 
 ## Rebuilding the processed data from raw data (optional)
 
-Raw recordings (TDT tanks, DeepLabCut CSVs, SimBA predictions) are on Zenodo (DOI **TODO**).
+Raw recordings (TDT tanks, DeepLabCut CSVs, SimBA predictions) are on Zenodo (DOI [10.5281/zenodo.21394487](https://doi.org/10.5281/zenodo.21394487)).
 Download and extract them, set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
 (defaults: `raw_data/tanks`, `raw_data/dlc`, `raw_data/simba`), then run:
 
