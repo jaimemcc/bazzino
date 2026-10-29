@@ -20,3 +20,5 @@ Fresh single-commit history in a new repo (Option A). The old repo keeps the ful
 - [03_phases.md](03_phases.md): order of work
 - [04_decisions_and_findings.md](04_decisions_and_findings.md): decisions, plus findings so far (notebook chatter, paths)
 - [05_data_format_migration.md](05_data_format_migration.md): pickle to parquet/npz/JSON
+- [06_audit_findings.md](06_audit_findings.md): first-pass audit
+- [07_notebook_run_status.md](07_notebook_run_status.md): which notebooks run cleanly top to bottom
