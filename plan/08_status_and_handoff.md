@@ -49,3 +49,5 @@ Target: new repo `mccutcheonlab/bazzino-paper`, one fresh commit.
 ## Addendum
 - Unused imports pruned from all 9 notebooks (AST check across all cells; re-executed clean). Scripts in session files/: unused_imports.py (report), prune_imports.py (apply). If notebooks are edited again, re-run the report.
 - Notebook outputs no longer carry absolute paths: jasp CSV prints are repo-relative, and expected statsmodels warnings are silenced in src/figure_config.py. Re-running in VS Code should stay clean; still grep tracked content for 'jmc010' before the final cut.
+- Added scripts/download_data.py (tested on a public record; the project record 21394487 was still 404 on 2026-10-29, so run it with --list first tomorrow and check archive names/layout match raw_data/{tanks,dlc,simba}) and scripts/precut_check.py (run before the cut: personal paths, forbidden files, notebook errors, sizes, required files; currently passes).
+- Panel outputs renamed figSx_* -> figS5_* (individual transitions) and figS6_nacl_da_trimmed. CITATION.cff license set to GPL-3.0-only (LICENSE is plain GPL-3.0 text; change to -or-later if intended).

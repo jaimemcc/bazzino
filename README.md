@@ -51,12 +51,13 @@ Final composed figures are in `paper/figs/`.
 | `data/*.csv`, `data/shap_values/` | File keys, subject keys, TTLs and SHAP outputs |
 | `results/` | Statistics tables exported for JASP |
 | `paper/figs/` | Final figures |
+| `scripts/` | `download_data.py` (fetch raw data from Zenodo), `precut_check.py` (pre-release checks) |
 | `tests/` | Tests for the data I/O module |
 
 ## Rebuilding the processed data from raw data (optional)
 
 Raw recordings (TDT tanks, DeepLabCut CSVs, SimBA predictions) are on Zenodo (DOI [10.5281/zenodo.21394487](https://doi.org/10.5281/zenodo.21394487)).
-Download and extract them, set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
+Download and extract them with `pixi run python scripts/download_data.py` (writes to `raw_data/`), then set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
 (defaults: `raw_data/tanks`, `raw_data/dlc`, `raw_data/simba`), then run:
 
 ```

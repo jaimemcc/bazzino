@@ -8,7 +8,7 @@ authors:
     affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
   - family-names: Russchen
     given-names: Dionne C. R.
-    affiliation: "UiT The Arctic University of Norway, Tromsø, Norway"
+    affiliation: "UiT The Arctic University of Norway, TromsÃƒÂ¸, Norway"
   - family-names: Keinath
     given-names: Alexandra T.
     affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
@@ -17,10 +17,10 @@ authors:
     affiliation: "University of Illinois at Chicago, Chicago, IL, United States"
   - family-names: McCutcheon
     given-names: James E.
-    affiliation: "UiT The Arctic University of Norway, Tromsø, Norway"
+    affiliation: "UiT The Arctic University of Norway, TromsÃƒÂ¸, Norway"
 doi: 10.5281/zenodo.21394487
 repository-code: "https://github.com/mccutcheonlab/bazzino-paper"
-license: See LICENSE
+license: GPL-3.0-only
 preferred-citation:
   type: article
   title: "Rapidly decreasing phasic dopamine responses precede a valence switch during satiation of sodium appetite"
