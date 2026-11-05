@@ -45,10 +45,9 @@ raw_data/simba/*.csv
 
 ## Decisions and details to check before publishing
 
-- **Data licence:** Zenodo asks for one. CC BY 4.0 is the usual choice for data (the code repo is GPL-3.0). Needs your decision.
-- **Zenodo version vs code:** the record DOI is already in README and CITATION.cff. Once the GitHub repo exists and is released, link it as a related identifier ("is supplemented by" the GitHub repo URL), or use the Zenodo-GitHub integration to archive the code in the same concept record.
-- **Related identifier:** add the bioRxiv DOI 10.64898/2026.07.16.738888 as "is supplement to".
+- **Data licence (decided):** CC BY 4.0 (the code repo is GPL-3.0).
+- **Related identifiers (decided):** on the form add (a) bioRxiv DOI 10.64898/2026.07.16.738888, relation "is supplement to"; (b) https://github.com/mccutcheonlab/bazzino-paper, relation "is supplemented by" (URL type). Once the paper is published, edit the record metadata (metadata edits are allowed after publishing, files are not) and add the journal DOI as "is supplement to"; the bioRxiv one can become "is previously published/ is version of" or stay.
+- **Videos (decided):** OK to share.
 - **Rats and sessions:** the description says 20 rats and 40 sessions (verified from the keys: 20 + 20 rows, each rat has one Depleted and one Replete session).
-- **Video content:** I have not looked at the videos. Check that sharing them is fine (ethics/data policy, nothing identifying in frame).
 - **Authors and affiliations** on the Zenodo form should match `CITATION.cff` (an encoding error in the Tromsø affiliations in that file was fixed on 2026-11-05).
 - **The 4 CSVs in `D:\Missing_files_copy`** (PB39 220627, PB23 220601, PB62 221022 and 221024) were not included; they are not needed.
