@@ -1,4 +1,4 @@
-# Zenodo record: draft description and checklist
+﻿# Zenodo record: draft description and checklist
 
 Record DOI: 10.5281/zenodo.21394487 (reserved, not published). Staging folder: `C:\Users\jmc010\Data\bazzino\zenodo_staging`.
 
@@ -6,7 +6,7 @@ Record DOI: 10.5281/zenodo.21394487 (reserved, not published). Staging folder: `
 
 | File | Size | Contents |
 |---|---|---|
-| `processed_data.zip` | 21 MB | `data/assembled/`, `data/shap_values/`, file/subject keys, `ttls.csv` |
+| `processed_data.zip` | 15 MB | `data/assembled/`, `data/shap_values/`, file/subject keys, `ttls.csv` |
 | `tanks_PB23.zip` ... `tanks_PB75.zip` (20 files) | 1.4-1.8 GB each, 32.8 GB total | TDT tanks and videos, one zip per rat |
 | `dlc.zip` | 180 MB | 40 DeepLabCut CSVs |
 | `simba.zip` | 675 MB | 40 SimBA prediction CSVs |
@@ -22,7 +22,7 @@ Data accompanying the paper by Bazzino, Russchen, Keinath, Roitman and McCutcheo
 
 The record contains two sets of files. You only need the first to reproduce the figures.
 
-**1. Processed data (`processed_data.zip`, 21 MB).** The assembled dataset used by every figure notebook (`data/assembled/`: parquet, npz and json files), SHAP outputs (`data/shap_values/`), and the session/subject key files and TTL times (`data/*.csv`). Extract it in the root of the code repository so that the files end up in `data/`.
+**1. Processed data (`processed_data.zip`, 15 MB).** The assembled dataset used by every figure notebook (`data/assembled/`: parquet, npz and json files), SHAP outputs (`data/shap_values/`), and the session/subject key files and TTL times (`data/*.csv`). Extract it in the root of the code repository so that the files end up in `data/`.
 
 **2. Raw data (about 34 GB).** Everything needed to rebuild the processed dataset with `src/assemble_all_data.py`:
 - `tanks_<rat>.zip` (20 files): fibre photometry recordings (TDT tank files) for the sodium-depleted and sodium-replete sessions of each rat, plus the session video (`*_Cam1.avi`). The videos are not used by the analysis code.
