@@ -12,11 +12,11 @@ This script runs the full data pipeline:
 Outputs a folder of portable files, data/assembled/ (written by
 data_io.save_assembled, read with data_io.load_assembled):
     arrays.npz      snips_* arrays
-    *.parquet       x_array, fits_df*
+    *.parquet       x_array
     *.json          metadata, params, behav_stats
 containing: x_array, snips_photo, snips_simba_zscore,
             snips_simba_shifted_baseline, snips_simba_raw,
-            snips_movement, fits_df, fits_df_da, fits_df_behav
+            snips_movement
 
 The intermediate caches (data/_cache_*.pickle) are private, regenerable
 dill pickles and are not part of the shared data.
@@ -1276,10 +1276,6 @@ def run_pipeline(params=None):
         "snips_simba_baseline": snips_simba_shifted_baseline,  # backward-compat alias
         "snips_simba": snips_simba_shifted_baseline,  # backward-compat alias
         "snips_movement": snips_movement,
-        "fits_df": fits_df,
-        "fits_df_da": fits_df_da,
-        "fits_df_da_velocity": fits_df_da_velocity,
-        "fits_df_behav": fits_df_behav,
         "metadata": metadata,
         "params": params,
         "behav_stats": behav_stats,  # Mean/std of movement per file, excluding first/last 1800 frames
@@ -1301,10 +1297,6 @@ def run_pipeline(params=None):
     print(f"  snips_simba_shifted_baseline shape: {snips_simba_shifted_baseline.shape}")
     print(f"  snips_simba_zscore shape:   {snips_simba_zscore.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
-    print(f"  fits_df shape:     {fits_df.shape}")
-    print(f"  fits_df_da shape:  {fits_df_da.shape}")
-    print(f"  fits_df_da_velocity shape:  {fits_df_da_velocity.shape}")
-    print(f"  fits_df_behav shape: {fits_df_behav.shape}")
     print(f"  dopamine transition method: {metadata['da_transition_method']}")
     print(f"  behavioral transition method: {metadata['behavior_transition_method']}")
     print(f"\nData processing metadata:")
