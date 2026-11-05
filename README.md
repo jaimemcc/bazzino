@@ -15,7 +15,7 @@ Fibre photometry of dopamine and SimBA-classified behaviour during sodium appeti
    ```
    pixi install
    ```
-2. The processed data needed for every figure is in `data/assembled/` (parquet, npz, json).
+2. The processed data needed for every figure is in `data/assembled/` (parquet, npz, json). It is also on Zenodo (`pixi run python scripts/download_data.py --only processed`) if you want to refresh or restore it.
 3. Open a notebook and run it top to bottom:
    ```
    pixi run jupyter lab
@@ -51,13 +51,13 @@ Final composed figures are in `paper/figs/`.
 | `data/*.csv`, `data/shap_values/` | File keys, subject keys, TTLs and SHAP outputs |
 | `results/` | Statistics tables exported for JASP |
 | `paper/figs/` | Final figures |
-| `scripts/` | `download_data.py` (fetch raw data from Zenodo), `prepare_zenodo_tanks.py` and `prepare_zenodo_dlc_simba.py` (build the raw-data archives for upload), `precut_check.py` (pre-release checks) |
+| `scripts/` | `download_data.py` (fetch data from Zenodo), `prepare_zenodo_*.py` (build the Zenodo archives), `precut_check.py` (pre-release checks) |
 | `tests/` | Tests for the data I/O module |
 
 ## Rebuilding the processed data from raw data (optional)
 
 Raw recordings (TDT tanks, DeepLabCut CSVs, SimBA predictions) are on Zenodo (DOI [10.5281/zenodo.21394487](https://doi.org/10.5281/zenodo.21394487)).
-Download and extract them with `pixi run python scripts/download_data.py` (writes to `raw_data/`), then set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
+Download and extract them with `pixi run python scripts/download_data.py --only raw` (about 34 GB, writes to `raw_data/`), then, if you changed the folders, set the paths in `PARAMS` at the top of `src/assemble_all_data.py`
 (defaults: `raw_data/tanks`, `raw_data/dlc`, `raw_data/simba`), then run:
 
 ```

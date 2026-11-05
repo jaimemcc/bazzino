@@ -4,14 +4,21 @@ Files are listed from the Zenodo API, downloaded into <dest>, verified against
 the MD5 checksums Zenodo provides, and archives (.zip, .tar, .tar.gz) are
 extracted in place. Re-running skips files that are already present and valid.
 
+The record has two sets of archives:
+  processed_data.zip   small (~21 MB): data/assembled, data/shap_values and the key files.
+                       Extracted into --repo-root (default: current folder), which is all
+                       the figure notebooks need.
+  tanks_*.zip, dlc.zip, simba.zip
+                       raw data (~34 GB). Extracted into <dest>, giving raw_data/tanks,
+                       raw_data/dlc and raw_data/simba, the defaults in src/assemble_all_data.py.
+
 Usage:
-    pixi run python scripts/download_data.py                 # download + extract to raw_data/
     pixi run python scripts/download_data.py --list          # just list the files
+    pixi run python scripts/download_data.py --only processed  # small download, enough for the notebooks
+    pixi run python scripts/download_data.py --only raw        # raw data only
+    pixi run python scripts/download_data.py                   # everything
     pixi run python scripts/download_data.py --dest D:/data --no-extract
     pixi run python scripts/download_data.py --record 21394487
-
-After extracting, point PARAMS in src/assemble_all_data.py at the folders
-(defaults: raw_data/tanks, raw_data/dlc, raw_data/simba).
 """
 
 import argparse
@@ -90,6 +97,10 @@ def download(entry, path):
     tmp.replace(path)
 
 
+def is_processed(name):
+    return name.startswith("processed_data")
+
+
 def extract(path, dest):
     name = path.name.lower()
     if name.endswith(".zip"):
@@ -106,7 +117,9 @@ def extract(path, dest):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--record", default=DEFAULT_RECORD, help="Zenodo record ID")
-    parser.add_argument("--dest", type=Path, default=Path("raw_data"), help="Destination folder")
+    parser.add_argument("--dest", type=Path, default=Path("raw_data"), help="Destination folder for downloads and raw data")
+    parser.add_argument("--repo-root", type=Path, default=Path("."), help="Where processed_data.zip is extracted")
+    parser.add_argument("--only", choices=["raw", "processed"], help="Download only one set of archives")
     parser.add_argument("--list", action="store_true", help="List files and exit")
     parser.add_argument("--no-extract", action="store_true", help="Do not extract archives")
     args = parser.parse_args()
@@ -122,6 +135,11 @@ def main():
     if args.list:
         return
 
+    if args.only:
+        files = [f for f in files if is_processed(f["name"]) == (args.only == "processed")]
+        if not files:
+            sys.exit(f"No '{args.only}' files in the record.")
+
     args.dest.mkdir(parents=True, exist_ok=True)
     for entry in files:
         path = args.dest / entry["name"]
@@ -135,8 +153,9 @@ def main():
                 path.unlink()
                 sys.exit(f"Checksum mismatch for {entry['name']}; file removed. Try again.")
             print("  checksum OK")
-        if not args.no_extract and extract(path, args.dest):
-            print(f"  extracted into {args.dest}")
+        target = args.repo_root if is_processed(entry["name"]) else args.dest
+        if not args.no_extract and extract(path, target):
+            print(f"  extracted into {target}")
 
     print("Done.")
 
