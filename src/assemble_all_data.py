@@ -2,18 +2,16 @@
 Assemble all data for Bazzino & Roitman sodium appetite project.
 
 This script runs the full data pipeline:
-  1. Assemble behavioural (DLC) data — movement metric snips + x_array
+  1. Assemble behavioural (DLC) data — movement snips + x_array
   2. Assemble photometry data — photometry snips + x_array
     2b. Assemble Simba appetitive probability snips + x_array
     3. Equalize photometry, DLC, and Simba datasets so they match row-for-row
-    4. Spectral clustering of photometry data (labels 0/1 added to x_array)
-    5. Compute cluster distances (clusterness, euclidean diff)
-    6. Sigmoidal transition fitting (deplete + 45NaCl only)
-        7. Combine behaviour and photometry x_arrays, realign trials
+    6. Transition fitting (deplete + 45NaCl only)
+    7. Combine behaviour and photometry x_arrays, realign trials
 
 Outputs a folder of portable files, data/assembled/ (written by
 data_io.save_assembled, read with data_io.load_assembled):
-    arrays.npz      snips_* arrays and pca_transformed
+    arrays.npz      snips_* arrays
     *.parquet       x_array, fits_df*, z_dep45
     *.json          metadata, params, behav_stats
 containing: x_array, snips_photo, snips_simba_zscore,
@@ -44,11 +42,7 @@ import dill
 import tdt
 import trompy as tp
 
-from scipy.spatial.distance import cdist
 from scipy.ndimage import uniform_filter1d
-from sklearn.decomposition import PCA
-from sklearn.cluster import SpectralClustering
-from sklearn.metrics import silhouette_score
 
 # Add src to path so we can import local modules
 SRC_DIR = Path(__file__).resolve().parent
@@ -56,7 +50,7 @@ sys.path.insert(0, str(SRC_DIR))
 from data_io import save_assembled
 from extract_behav_parameters import (
     get_ttls, read_DLC_csv, interpolate_low_likehood,
-    calc_bodypart_movement, calc_angular_velocity,
+    calc_bodypart_movement,
     get_behav_snips, smooth_array,
 )
 from extract_simba import (
@@ -86,10 +80,6 @@ PARAMS = {
     "tank_folder": Path("raw_data/tanks"),
     "dlc_folder": Path("raw_data/dlc"),
     "simba_folder": Path("raw_data/simba"),
-
-    # ── Behavioural metric ──
-    # NOTE: Both movement and angular_velocity are now always calculated
-    "behav_metric": "movement",  # Deprecated - kept for reference only
 
     # ── DLC parameters ──
     "dlc_likelihood_threshold": 0.6,
@@ -136,30 +126,18 @@ PARAMS = {
     # ── Velocity smoothing ──
     "vel_smooth_window": 5,
 
-    # ── Clustering ──
-    "num_retained_pcs": 3,
-    "n_clusters": None,           # None = auto-select via silhouette sweep; or set to int to force
-    "max_n_clusters": 9,          # Maximum number of clusters to test in sweep
-    "clustering_affinity": "sigmoid",
-    "clustering_assign_labels": "discretize",
-
     # ── Movement analysis parameters ──
     "normalize_movement": False,              # Normalize to [0,1] by default
     "movement_threshold": 3,              # Threshold for normalized movement
     "calculate_raw_movement": True,         # Optional: also analyze raw pixels
     "movement_threshold_raw": 0.5,           # Threshold for raw pixel movement (pixels/frame)
 
-    # ── Angular velocity analysis parameters ──
-    "angvel_threshold": 1.0,                 # Threshold for angular velocity (deg/frame)
-
     # ── Sigmoidal transition fit ──
     "transition_condition": "deplete",
     "transition_infusion": "45NaCl",
     "logistic_maxfev": 60000,
-    # Dopamine transition method for realignment:
-    #   - "max_velocity": use the trial of maximum negative derivative
-    #     from the selected DA summary signal
-    #   - "sigmoid_cluster": fit the legacy cluster-based logistic transition
+    # Dopamine transition: trial of maximum negative derivative of the
+    # selected DA summary signal.
     "da_transition_method": "max_velocity",
     "da_transition_signal_col": "auc_snips",
     "da_velocity_smoothing_window": 5,
@@ -195,14 +173,12 @@ PARAMS = {
     "cache_behav": True,          # Skip DLC extraction, load from cache
     "cache_photo": True,          # Skip TDT extraction, load from cache
     "cache_simba": True,          # Skip Simba extraction, load from cache
-    "cache_clustering": True,     # Skip PCA + spectral clustering, load from cache
     "cache_transitions": False,    # Skip transition fitting, load from cache
 
     # Cache filenames (in data_folder)
     "cache_behav_file": "_cache_behav.pickle",
     "cache_photo_file": "_cache_photo.pickle",
     "cache_simba_file": "_cache_simba.pickle",
-    "cache_clustering_file": "_cache_clustering.pickle",
     "cache_transitions_file": "_cache_transitions.pickle",
 }
 
@@ -283,24 +259,6 @@ def get_movement_vector(stub, dlc_folder, params):
         return movement_norm, movement_raw
     else:
         return movement_norm
-
-
-def get_angular_velocity_vector(stub, dlc_folder, params):
-    """Get angular velocity from DLC data for a single session."""
-    df = read_DLC_csv(stub, dlc_folder)
-    df = interpolate_low_likehood(df, threshold=params["dlc_likelihood_threshold"])
-    df = calc_angular_velocity(df, rightear="r_ear", leftear="l_ear", absolute=True)
-    return df.d_angle_deg
-
-
-def get_behav_vector(stub, dlc_folder, params):
-    """Dispatch to the correct behavioural metric function."""
-    if params["behav_metric"] == "movement":
-        return get_movement_vector(stub, dlc_folder, params)
-    elif params["behav_metric"] == "angular_velocity":
-        return get_angular_velocity_vector(stub, dlc_folder, params)
-    else:
-        raise ValueError(f"Unknown behav_metric: {params['behav_metric']}")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -387,9 +345,9 @@ def assemble_photometry(params):
 
 
 def assemble_behaviour(params):
-    """Step 1: Assemble behavioural (DLC) snips and x_array. Always calculates both movement and angular velocity."""
+    """Step 1: Assemble behavioural (DLC) movement snips and x_array."""
     print("\n" + "=" * 60)
-    print("STEP 1: Assembling behavioural data (movement + angular velocity)")
+    print("STEP 1: Assembling behavioural data (movement)")
     print("=" * 60)
 
     data_folder = params["data_folder"]
@@ -400,8 +358,8 @@ def assemble_behaviour(params):
         pd.read_csv(data_folder / "45NaCl_FileKey.csv"),
     ])
 
-    snips_movement_list, snips_angvel_list, snips_movement_raw_list, x_list = [], [], [], []
-    behav_stats = {}  # Store mean/std for each file's behavior vectors
+    snips_movement_list, snips_movement_raw_list, x_list = [], [], []
+    behav_stats = {}  # Store mean/std of the movement vector for each file
     
     for _, row in meta_df.iterrows():
         stub = row["Folder"]
@@ -415,17 +373,12 @@ def assemble_behaviour(params):
                 movement_vec = movement_result
                 movement_vec_raw = None
             
-            # Get angular velocity data
-            angvel_vec = get_angular_velocity_vector(stub, dlc_folder, params)
-            
-            # Calculate mean and std for behavior vectors, excluding first and last 1800 frames
+            # Calculate mean and std of movement, excluding first and last 1800 frames
             exclude_frames = 1800
             valid_range = slice(exclude_frames, -exclude_frames if exclude_frames > 0 else None)
             
             movement_mean = np.nanmean(movement_vec[valid_range])
             movement_std = np.nanstd(movement_vec[valid_range])
-            angvel_mean = np.nanmean(angvel_vec[valid_range])
-            angvel_std = np.nanstd(angvel_vec[valid_range])
             
             # Store with file identifier (for reference/metadata)
             file_id = f"{row['Subject']}_{stub}"
@@ -436,27 +389,18 @@ def assemble_behaviour(params):
                 "condition": row["Physiological state"],
                 "movement_mean": movement_mean,
                 "movement_std": movement_std,
-                "angvel_mean": angvel_mean,
-                "angvel_std": angvel_std,
             }
             
-            # Create snips from both
             solenoid_ts = get_ttls(stub, data_folder)
             snips_movement = get_behav_snips(
                 solenoid_ts=solenoid_ts,
                 behav_vector=movement_vec,
                 zscore_to_baseline=params["dlc_zscore_to_baseline"],
             )
-            snips_angvel = get_behav_snips(
-                solenoid_ts=solenoid_ts,
-                behav_vector=angvel_vec,
-                zscore_to_baseline=False,  # Don't zscore angular velocity
-            )
             
             n = len(snips_movement)
             print(f"{n} trials")
             snips_movement_list.append(snips_movement)
-            snips_angvel_list.append(snips_angvel)
             
             # Also create snips for raw movement if available
             if movement_vec_raw is not None:
@@ -475,14 +419,11 @@ def assemble_behaviour(params):
                 "infusiontype": infusion_label,
                 "movement_mean": movement_mean,
                 "movement_std": movement_std,
-                "angvel_mean": angvel_mean,
-                "angvel_std": angvel_std,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
 
     snips_movement_all = np.concatenate(snips_movement_list)
-    snips_angvel_all = np.concatenate(snips_angvel_list)
     snips_movement_raw_all = np.concatenate(snips_movement_raw_list) if snips_movement_raw_list else None
     x_all = (
         pd.concat(x_list, ignore_index=True)
@@ -503,17 +444,14 @@ def assemble_behaviour(params):
     # Filter conditions
     mask = ~x_all.condition.isin(params["conditions_to_exclude"])
     snips_movement_all = snips_movement_all[mask.values]
-    snips_angvel_all = snips_angvel_all[mask.values]
     if snips_movement_raw_all is not None:
         snips_movement_raw_all = snips_movement_raw_all[mask.values]
     x_all = x_all[mask].reset_index(drop=True)
 
     print(f"  Behaviour assembled: {snips_movement_all.shape[0]} trials, {snips_movement_all.shape[1]} bins")
-    print(f"    Movement snips: {snips_movement_all.shape}")
-    print(f"    Angular velocity snips: {snips_angvel_all.shape}")
     if snips_movement_raw_all is not None:
         print(f"  Raw movement snips also assembled")
-    return snips_movement_all, snips_angvel_all, snips_movement_raw_all, x_all, behav_stats
+    return snips_movement_all, snips_movement_raw_all, x_all, behav_stats
 
 
 def assemble_simba(params):
@@ -717,7 +655,6 @@ def equalize_datasets(
     snips_photo,
     x_behav,
     snips_movement,
-    snips_angvel,
     snips_movement_raw=None,
     x_simba=None,
     snips_simba_raw=None,
@@ -760,7 +697,6 @@ def equalize_datasets(
     snips_photo = snips_photo[idx_p]
     x_behav = x_behav.iloc[idx_b].reset_index(drop=True)
     snips_movement = snips_movement[idx_b]
-    snips_angvel = snips_angvel[idx_b]
 
     if snips_movement_raw is not None:
         snips_movement_raw = snips_movement_raw[idx_b]
@@ -780,156 +716,12 @@ def equalize_datasets(
     assert len(x_photo) == len(x_behav), "Datasets still not aligned!"
     if x_simba is not None and snips_simba is not None:
         assert len(x_photo) == len(x_simba), "Simba dataset is not aligned!"
-    return x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba_raw, snips_simba, snips_simba_zscore
+    return x_photo, snips_photo, x_behav, snips_movement, snips_movement_raw, x_simba, snips_simba_raw, snips_simba, snips_simba_zscore
 
 
 # ──────────────────────────────────────────────────────────────────────
-# STEP 4: Clustering of photometry data
+# STEP 6: Transition fitting
 # ──────────────────────────────────────────────────────────────────────
-
-def cluster_photometry(snips_photo, x_array, params):
-    """
-    Step 4: PCA + spectral clustering on photometry snips.
-    Adds cluster_photo column (0 or 1) to x_array.
-    Returns x_array, pca_transformed data.
-    """
-    print("\n" + "=" * 60)
-    print("STEP 4: Spectral clustering of photometry data")
-    print("=" * 60)
-
-    num_pcs = params["num_retained_pcs"]
-
-    # PCA
-    pca = PCA(n_components=snips_photo.shape[1], whiten=True)
-    pca.fit(snips_photo)
-    transformed = pca.transform(snips_photo)
-
-    x = 100 * pca.explained_variance_ratio_
-    xprime = x - (x[0] + (x[-1] - x[0]) / (x.size - 1) * np.arange(x.size))
-    auto_pcs = np.argmin(xprime)
-    print(f"  Auto-detected PCs to keep: {auto_pcs}, using: {num_pcs}")
-
-    # Determine number of clusters
-    n_clusters = params["n_clusters"]
-    if n_clusters is None:
-        # Sweep through cluster numbers and pick best silhouette score
-        max_k = params["max_n_clusters"]
-        possible_n = np.arange(2, max_k + 1)
-        sil_scores = np.nan * np.ones(possible_n.size)
-
-        for idx, k in enumerate(possible_n):
-            m = SpectralClustering(
-                n_clusters=k,
-                affinity=params["clustering_affinity"],
-                assign_labels=params["clustering_assign_labels"],
-                random_state=123,
-            )
-            m.fit(transformed[:, :num_pcs])
-            sil_scores[idx] = silhouette_score(
-                transformed[:, :num_pcs], m.labels_, metric="cosine"
-            )
-            print(f"    k={k}: silhouette={sil_scores[idx]:.3f}")
-
-        best_idx = np.nanargmax(sil_scores)
-        n_clusters = int(possible_n[best_idx])
-        print(f"  Best silhouette at k={n_clusters} (score={sil_scores[best_idx]:.3f})")
-    else:
-        print(f"  Using fixed n_clusters={n_clusters}")
-
-    # Final clustering with chosen n_clusters
-    model = SpectralClustering(
-        # n_clusters=n_clusters,
-        n_clusters=2, # Force 2 clusters for better interpretability, silhouette is almost identical to n=4
-        affinity=params["clustering_affinity"],
-        assign_labels=params["clustering_assign_labels"],
-        random_state=123,
-    )
-    model.fit(transformed[:, :num_pcs])
-    sil = silhouette_score(transformed[:, :num_pcs], model.labels_, metric="cosine")
-    print(f"  Final clustering: k={n_clusters}, silhouette={sil:.3f}")
-
-    # Reorder clusters so cluster 0 = most positive response during infusion
-    # This matches the reorder_clusters function from spectral_clustering_all_trials.ipynb
-    pre_window = int(params["photo_baseline_seconds"] * 10)  # 50 bins
-    uniquelabels = list(set(model.labels_))
-    responses = np.nan * np.ones((len(uniquelabels),))
-    for l, label in enumerate(uniquelabels):
-        responses[l] = np.mean(snips_photo[model.labels_ == label, pre_window:2 * pre_window])
-    temp = np.argsort(responses).astype(int)[::-1]
-    temp = np.array([np.where(temp == a)[0][0] for a in uniquelabels])
-    newlabels = np.array([temp[a] for a in list(np.digitize(model.labels_, uniquelabels) - 1)])
-
-    x_array = x_array.assign(cluster_photo=newlabels)
-    print(f"  Cluster counts: {dict(zip(*np.unique(newlabels, return_counts=True)))}")
-
-    return x_array, transformed
-
-
-# ──────────────────────────────────────────────────────────────────────
-# STEP 5: Cluster distances (clusterness + euclidean)
-# ──────────────────────────────────────────────────────────────────────
-
-def compute_cluster_distances(x_array, pca_data, params):
-    """
-    Step 5: Compute clusterness (projection onto cluster vector) and
-    euclidean distance difference for each trial.
-    """
-    print("\n" + "=" * 60)
-    print("STEP 5: Computing cluster distances")
-    print("=" * 60)
-
-    num_pcs = params["num_retained_pcs"]
-    pca_subset = pca_data[:, :num_pcs]
-
-    centroid_0 = pca_subset[x_array.cluster_photo == 0].mean(axis=0)
-    centroid_1 = pca_subset[x_array.cluster_photo == 1].mean(axis=0)
-
-    # Clusterness (projection)
-    cluster_vector = centroid_0 - centroid_1
-    cluster_vector_norm = cluster_vector / np.linalg.norm(cluster_vector)
-    projections = np.dot(pca_subset - centroid_1, cluster_vector_norm)
-    normalized = (projections - projections.min()) / (projections.max() - projections.min())
-    x_array = x_array.assign(clusterness_photo=normalized)
-
-    # Euclidean distance difference
-    centroids = np.vstack([centroid_0, centroid_1])
-    distances = cdist(pca_subset, centroids, metric="euclidean")
-    x_array = x_array.assign(euclidean_diff=distances[:, 1] - distances[:, 0])
-
-    print("  Added clusterness_photo and euclidean_diff columns.")
-    return x_array
-
-
-# ──────────────────────────────────────────────────────────────────────
-# STEP 6: Sigmoidal transition fitting
-# ──────────────────────────────────────────────────────────────────────
-
-def find_sigmoidal_transitions(x_array, params):
-    """
-    Step 6: Fit sigmoidal transitions per rat for deplete + 45NaCl.
-    Uses raw cluster assignments (binary).
-    Returns fits_df with transition points.
-    """
-    print("\n" + "=" * 60)
-    print("STEP 6: Finding sigmoidal transitions")
-    print("=" * 60)
-
-    cond = params["transition_condition"]
-    inf = params["transition_infusion"]
-    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
-    fits_df, _ = fit_logistic_transitions_by_id(
-        df_dep_45,
-        signal_col="cluster_photo",
-        value_transform=lambda sig: np.logical_not(sig).astype(int),
-        direction="decreasing",
-        maxfev=params["logistic_maxfev"],
-        min_x0=0,
-    )
-
-    print(f"  Successful fits: {len(fits_df)} / {len(df_dep_45.id.unique())} rats")
-    print(f"  Transition points: {fits_df.x0_orig.round(1).tolist()}")
-    return fits_df
-
 
 def find_behavioral_transitions(x_array, params, signal_col="simba_median_balance"):
     """Fit per-rat behavioral transitions for deplete + 45NaCl.
@@ -1120,16 +912,6 @@ def get_time_moving(snips, threshold=0.02, start_bin=50, end_bin=150):
     return np.array(moving)
 
 
-def get_time_above_angvel_threshold(snips, threshold=1.0, start_bin=50, end_bin=150):
-    """Calculate proportion of bins above angular velocity threshold per trial."""
-    angvel_above = []
-    for i in range(snips.shape[0]):
-        snip = snips[i, start_bin:end_bin]
-        tmp = len([x for x in snip if x > threshold]) / len(snip)
-        angvel_above.append(tmp)
-    return np.array(angvel_above)
-
-
 def get_auc_by_window(snips, start_bin=50, end_bin=150):
     """Calculate per-trial AUC using trapezoidal integration over a bin window."""
     snips = np.asarray(snips, dtype=float)
@@ -1156,46 +938,6 @@ def add_photometry_summary_columns(x_array, snips_photo, params):
         auc_snips_early=get_auc_by_window(snips_photo, start_bin=s_early, end_bin=e_early),
         auc_snips_late=get_auc_by_window(snips_photo, start_bin=s_late, end_bin=e_late),
     )
-
-
-def sync_aligned_columns(target_df, source_df, merge_cols=None):
-    """Copy aligned metadata columns from source_df into target_df.
-
-    This keeps freshly recomputed columns available even when downstream cached
-    dataframes were created before those columns existed.
-    """
-    if merge_cols is None:
-        merge_cols = ["trial", "id", "condition", "infusiontype"]
-
-    source_cols = [col for col in source_df.columns if col not in merge_cols]
-    if not source_cols:
-        return target_df
-
-    if len(target_df) == len(source_df) and target_df[merge_cols].equals(source_df[merge_cols]):
-        for col in source_cols:
-            target_df[col] = source_df[col].values
-        return target_df
-
-    aligned_source = (
-        source_df[merge_cols + source_cols]
-        .drop_duplicates(subset=merge_cols)
-    )
-    target_df = (
-        target_df
-        .assign(_row_order=np.arange(len(target_df)))
-        .merge(aligned_source, on=merge_cols, how="left", suffixes=("", "_fresh"))
-        .sort_values("_row_order")
-        .drop(columns=["_row_order"])
-        .reset_index(drop=True)
-    )
-
-    for col in source_cols:
-        fresh_col = f"{col}_fresh"
-        if fresh_col in target_df.columns:
-            target_df[col] = target_df[fresh_col]
-            target_df = target_df.drop(columns=[fresh_col])
-
-    return target_df
 
 
 def _drop_legacy_simba_columns(df):
@@ -1268,14 +1010,11 @@ def _normalize_da_transition_method(method):
     aliases = {
         "velocity": "max_velocity",
         "max_velocity": "max_velocity",
-        "sigmoid": "sigmoid_cluster",
-        "cluster_sigmoid": "sigmoid_cluster",
-        "sigmoid_cluster": "sigmoid_cluster",
     }
     if method_norm not in aliases:
         raise ValueError(
             f"Unknown da_transition_method '{method}'. "
-            "Expected one of: max_velocity, velocity, sigmoid_cluster, cluster_sigmoid, sigmoid"
+            "Expected one of: max_velocity, velocity"
         )
     return aliases[method_norm]
 
@@ -1284,7 +1023,7 @@ def _validate_transition_params(params):
     """Validate transition-related parameter values with clear errors."""
     allowed_methods = ["sigmoid", "max_velocity", "velocity"]
     allowed_modes = ["median_balance", "binarized", "quantized"]
-    allowed_da_methods = ["max_velocity", "velocity", "sigmoid_cluster", "cluster_sigmoid", "sigmoid"]
+    allowed_da_methods = ["max_velocity", "velocity"]
 
     method_raw = params.get("behavior_transition_method", "sigmoid")
     mode_raw = params.get("behavior_transition_mode", "median_balance")
@@ -1361,13 +1100,11 @@ def combine_and_realign(
     x_photo,
     snips_photo,
     snips_movement,
-    snips_angvel,
     fits_df_da,
     fits_df_behav,
     params,
     snips_movement_raw=None,
     fits_df_da_velocity=None,
-    fits_df_da_cluster=None,
 ):
     """
     Step 7: Add AUCs and time_moving to x_array, create realigned deplete+45NaCl subset.
@@ -1378,12 +1115,10 @@ def combine_and_realign(
 
     # Smooth velocity snips
     snips_movement_smooth = smooth_array(snips_movement, window_size=params["vel_smooth_window"])
-    snips_angvel_smooth = smooth_array(snips_angvel, window_size=params["vel_smooth_window"])
 
     # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
     auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
-    auc_angvel = get_auc_by_window(snips_angvel_smooth, start_bin=s, end_bin=e)
 
     # Calculate time moving (normalized)
     time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
@@ -1395,16 +1130,9 @@ def combine_and_realign(
         time_moving_raw = get_time_moving(snips_movement_raw, threshold=params["movement_threshold_raw"],
                                           start_bin=s, end_bin=e)
 
-    # Calculate proportion of time above angular velocity threshold
-    time_above_angvel_threshold = get_time_above_angvel_threshold(
-        snips_angvel, threshold=params["angvel_threshold"],
-        start_bin=s, end_bin=e)
-
     x_combined = add_photometry_summary_columns(x_photo, snips_photo, params).assign(
         auc_movement=auc_movement,
-        auc_angvel=auc_angvel,
         time_moving=time_moving,
-        time_above_angvel_threshold=time_above_angvel_threshold,
     )
     
     # Add time_moving_raw if available
@@ -1417,17 +1145,11 @@ def combine_and_realign(
         fits_df_da_velocity if fits_df_da_velocity is not None else fits_df_da,
         "realigned_trials_da_velocity",
     )
-    realigned_trials_da_cluster = build_realigned_trials(
-        x_combined,
-        fits_df_da_cluster if fits_df_da_cluster is not None else fits_df_da,
-        "realigned_trials_da_cluster",
-    )
     realigned_trials_behav = build_realigned_trials(x_combined, fits_df_behav, "realigned_trials_behav")
 
     x_combined = x_combined.assign(
         realigned_trials_da=realigned_trials_da,
         realigned_trials_da_velocity=realigned_trials_da_velocity,
-        realigned_trials_da_cluster=realigned_trials_da_cluster,
         realigned_trials_behav=realigned_trials_behav,
         # Backward-compat alias while notebooks migrate to the clearer DA-specific name.
         trial_aligned=realigned_trials_da,
@@ -1447,9 +1169,6 @@ def combine_and_realign(
     print(
         f"  Added realigned_trials_da column "
         f"(NaN for {(x_combined['realigned_trials_da'].isna()).sum()} trials without DA fits)"
-    )
-    print(
-        f"  Added realigned_trials_da_velocity and realigned_trials_da_cluster comparison columns"
     )
     print(
         f"  Added realigned_trials_behav column "
@@ -1479,9 +1198,9 @@ def run_pipeline(params=None):
     print(f"  DLC folder: {params['dlc_folder']}")
     print(f"  Tank folder: {params['tank_folder']}")
     print(f"  Simba folder: {params['simba_folder']}")
-    print(f"  Calculating: movement + angular velocity (both always calculated)")
+    print(f"  Calculating: movement")
     print(f"  Caching: behav={params['cache_behav']}, photo={params['cache_photo']}, simba={params['cache_simba']}, "
-          f"clustering={params['cache_clustering']}, transitions={params['cache_transitions']}")
+          f"transitions={params['cache_transitions']}")
 
     data_folder = params["data_folder"]
 
@@ -1493,14 +1212,13 @@ def run_pipeline(params=None):
         cached = None
     if cached is not None:
         snips_movement = cached["snips_movement"]
-        snips_angvel = cached["snips_angvel"]
         snips_movement_raw = cached.get("snips_movement_raw", None)
         x_behav = cached["x_behav"]
         behav_stats = cached.get("behav_stats", {})
-        print(f"  Behaviour from cache: {snips_movement.shape[0]} trials (movement + angvel)")
+        print(f"  Behaviour from cache: {snips_movement.shape[0]} trials")
     else:
-        snips_movement, snips_angvel, snips_movement_raw, x_behav, behav_stats = assemble_behaviour(params)
-        cache_dict = {"snips_movement": snips_movement, "snips_angvel": snips_angvel, "x_behav": x_behav, "behav_stats": behav_stats}
+        snips_movement, snips_movement_raw, x_behav, behav_stats = assemble_behaviour(params)
+        cache_dict = {"snips_movement": snips_movement, "x_behav": x_behav, "behav_stats": behav_stats}
         if snips_movement_raw is not None:
             cache_dict["snips_movement_raw"] = snips_movement_raw
         _save_cache(cache_dict, behav_cache_path, "behaviour", params)
@@ -1547,12 +1265,11 @@ def run_pipeline(params=None):
             simba_cache_path, "simba", params)
 
     # Step 3: Equalize
-    x_photo, snips_photo, x_behav, snips_movement, snips_angvel, snips_movement_raw, x_simba, snips_simba_raw, snips_simba_shifted_baseline, snips_simba_zscore = equalize_datasets(
+    x_photo, snips_photo, x_behav, snips_movement, snips_movement_raw, x_simba, snips_simba_raw, snips_simba_shifted_baseline, snips_simba_zscore = equalize_datasets(
         x_photo,
         snips_photo,
         x_behav,
         snips_movement,
-        snips_angvel,
         snips_movement_raw,
         x_simba=x_simba,
         snips_simba_raw=snips_simba_raw,
@@ -1561,7 +1278,7 @@ def run_pipeline(params=None):
     )
     
     # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
-    behav_cols = ["movement_mean", "movement_std", "angvel_mean", "angvel_std"]
+    behav_cols = ["movement_mean", "movement_std"]
     for col in behav_cols:
         if col in x_behav.columns:
             x_photo[col] = x_behav[col]
@@ -1582,28 +1299,7 @@ def run_pipeline(params=None):
         # Always make thresholded behavior transition columns available on x_array.
         x_photo = _add_behavior_transition_columns(x_photo, params)
 
-    # Step 4: Clustering
-    clustering_cache_path = data_folder / params["cache_clustering_file"]
-    if params["cache_clustering"]:
-        cached = _load_cache(clustering_cache_path, "clustering")
-    else:
-        cached = None
-    if cached is not None:
-        x_combined, pca_transformed = cached["x_combined"], cached["pca_transformed"]
-        x_combined = sync_aligned_columns(x_combined, x_photo)
-        x_combined = _drop_legacy_simba_columns(x_combined)
-        print(f"  Clustering from cache: {len(x_combined)} trials")
-    else:
-        x_combined, pca_transformed = cluster_photometry(snips_photo, x_photo, params)
-        # Step 5 always runs with fresh clustering
-        x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
-        x_combined = _drop_legacy_simba_columns(x_combined)
-        _save_cache({"x_combined": x_combined, "pca_transformed": pca_transformed},
-                    clustering_cache_path, "clustering", params)
-
-    # Step 5: Cluster distances (only if loaded from cache, otherwise already done above)
-    if cached is not None:
-        x_combined = compute_cluster_distances(x_combined, pca_transformed, params)
+    x_combined = _drop_legacy_simba_columns(x_photo)
 
     # Step 6: Transition fitting
     print("\nSTEP 6: Calculate transitions")
@@ -1661,7 +1357,6 @@ def run_pipeline(params=None):
         and "fits_df" in cached
         and "fits_df_behav" in cached
         and "fits_df_da_velocity" in cached
-        and "fits_df_da_cluster" in cached
         and cache_mode == current_mode
         and cached_method == current_method
         and cached_da_method == current_da_method
@@ -1673,7 +1368,6 @@ def run_pipeline(params=None):
         fits_df = cached["fits_df"]
         fits_df_da = cached.get("fits_df_da", fits_df)
         fits_df_da_velocity = cached["fits_df_da_velocity"]
-        fits_df_da_cluster = cached["fits_df_da_cluster"]
         fits_df_behav = cached["fits_df_behav"]
         print(
             f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits "
@@ -1687,13 +1381,9 @@ def run_pipeline(params=None):
                 f"current behavior={current_method}/{current_mode}, "
                 f"current DA={current_da_method}/{current_da_signal_col}/{current_da_window}); recomputing transitions."
             )
-        print("  Calculating DA transitions using both comparison methods")
-        fits_df_da_cluster = find_sigmoidal_transitions(x_combined, params)
+        print("  Calculating DA and behavioral transitions")
         fits_df_da_velocity = find_da_velocity_transitions(x_combined, params)
-        if current_da_method == "max_velocity":
-            fits_df_da = fits_df_da_velocity
-        else:
-            fits_df_da = fits_df_da_cluster
+        fits_df_da = fits_df_da_velocity
         if current_method == "max_velocity":
             fits_df_behav = find_velocity_transitions(x_combined, params)
         else:
@@ -1705,7 +1395,6 @@ def run_pipeline(params=None):
                 "fits_df": fits_df_da,
                 "fits_df_da": fits_df_da,
                 "fits_df_da_velocity": fits_df_da_velocity,
-                "fits_df_da_cluster": fits_df_da_cluster,
                 "fits_df_behav": fits_df_behav,
                 "da_transition_method": current_da_method,
                 "da_transition_signal_col": current_da_signal_col,
@@ -1731,13 +1420,11 @@ def run_pipeline(params=None):
         x_combined,
         snips_photo,
         snips_movement,
-        snips_angvel,
         fits_df_da,
         fits_df_behav,
         params,
         snips_movement_raw,
         fits_df_da_velocity=fits_df_da_velocity,
-        fits_df_da_cluster=fits_df_da_cluster,
     )
 
     # Create metadata about data processing
@@ -1764,7 +1451,7 @@ def run_pipeline(params=None):
         "behavior_transition_high_threshold": params.get("behavior_transition_high_threshold", 0.7),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
-        "behav_metrics": "movement + angular_velocity (both always calculated)",
+        "behav_metrics": "movement",
         # Movement analysis parameters
         "normalize_movement": params.get("normalize_movement", True),
         "movement_threshold": params.get("movement_threshold", 0.02),
@@ -1776,8 +1463,6 @@ def run_pipeline(params=None):
         "auc_late_end_bin": params.get("auc_late_end_bin", 150),
         "calculate_raw_movement": params.get("calculate_raw_movement", False),
         "movement_threshold_raw": params.get("movement_threshold_raw", 0.5) if params.get("calculate_raw_movement", False) else None,
-        # Angular velocity parameters
-        "angvel_threshold": params.get("angvel_threshold", 1.0),
     }
 
     # Save output
@@ -1790,17 +1475,14 @@ def run_pipeline(params=None):
         "snips_simba_baseline": snips_simba_shifted_baseline,  # backward-compat alias
         "snips_simba": snips_simba_shifted_baseline,  # backward-compat alias
         "snips_movement": snips_movement,
-        "snips_angvel": snips_angvel,
-        "pca_transformed": pca_transformed,
         "fits_df": fits_df,
         "fits_df_da": fits_df_da,
         "fits_df_da_velocity": fits_df_da_velocity,
-        "fits_df_da_cluster": fits_df_da_cluster,
         "fits_df_behav": fits_df_behav,
         "z_dep45": z_dep45,
         "metadata": metadata,
         "params": params,
-        "behav_stats": behav_stats,  # Mean/std for behavior vectors (movement & angvel) per file, excluding first/last 1800 frames
+        "behav_stats": behav_stats,  # Mean/std of movement per file, excluding first/last 1800 frames
     }
     
     # Add optional raw movement data
@@ -1819,12 +1501,10 @@ def run_pipeline(params=None):
     print(f"  snips_simba_shifted_baseline shape: {snips_simba_shifted_baseline.shape}")
     print(f"  snips_simba_zscore shape:   {snips_simba_zscore.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
-    print(f"  snips_angvel shape:     {snips_angvel.shape}")
     print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"  fits_df_da shape:  {fits_df_da.shape}")
     print(f"  fits_df_da_velocity shape:  {fits_df_da_velocity.shape}")
-    print(f"  fits_df_da_cluster shape:  {fits_df_da_cluster.shape}")
     print(f"  fits_df_behav shape: {fits_df_behav.shape}")
     print(f"  dopamine transition method: {metadata['da_transition_method']}")
     print(f"  behavioral transition method: {metadata['behavior_transition_method']}")

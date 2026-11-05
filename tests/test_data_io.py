@@ -18,7 +18,7 @@ def make_data():
             "score": [0.5, np.nan, 1.5, 2.5, -1.0, 3.0],
             "ok": [True, False, True, True, False, True],
         }),
-        "fits_df_da_cluster": pd.DataFrame({"k": [1.0, 2.0]}, index=[0, 3]),
+        "fits_df_behav": pd.DataFrame({"k": [1.0, 2.0]}, index=[0, 3]),
         "snips_photo": rng.normal(size=(6, 10)),
         "snips_movement": np.array([[1.0, np.nan], [2.0, 3.0]]),
         "metadata": {"smoothed": True, "window": 5, "cols": ["a", "b"]},
@@ -43,7 +43,7 @@ def test_round_trip(tmp_path):
     for key in ("snips_photo", "snips_movement"):
         assert loaded[key].dtype == data[key].dtype
         np.testing.assert_array_equal(loaded[key], data[key])
-    for key in ("x_array", "fits_df_da_cluster"):
+    for key in ("x_array", "fits_df_behav"):
         pd.testing.assert_frame_equal(
             loaded[key], data[key], check_column_type=False, check_dtype=False
         )

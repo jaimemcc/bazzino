@@ -114,7 +114,7 @@ INFUSION_END_BIN = 150  # End of infusion window
 # They are stored in the 'metadata' field of assembled_data.pickle.
 # These are the DEFAULT expected values — actual values should be read from metadata.
 #
-# Behavioral data (movement/angular velocity):
+# Behavioral data (movement):
 #   - Smoothed during assembly (Gaussian smoothing, window=10)
 #   - Z-scored to baseline (pre-infusion window)
 #   → Do NOT smooth or z-score again in notebooks
