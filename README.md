@@ -51,7 +51,7 @@ Final composed figures are in `paper/figs/`.
 | `data/*.csv`, `data/shap_values/` | File keys, subject keys, TTLs and SHAP outputs |
 | `results/` | Statistics tables exported for JASP |
 | `paper/figs/` | Final figures |
-| `scripts/` | `download_data.py` (fetch raw data from Zenodo), `prepare_zenodo_tanks.py` (build the per-rat photometry archives for upload), `precut_check.py` (pre-release checks) |
+| `scripts/` | `download_data.py` (fetch raw data from Zenodo), `prepare_zenodo_tanks.py` and `prepare_zenodo_dlc_simba.py` (build the raw-data archives for upload), `precut_check.py` (pre-release checks) |
 | `tests/` | Tests for the data I/O module |
 
 ## Rebuilding the processed data from raw data (optional)
