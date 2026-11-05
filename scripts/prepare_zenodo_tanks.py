@@ -1,8 +1,9 @@
 """Build the Zenodo archives for the photometry (TDT tank) data: one zip per rat.
 
 Reads data/{10NaCl,45NaCl}_FileKey.csv, keeps only the sessions whose condition
-is not in `conditions_to_exclude` (src/assemble_all_data.py), and zips only the
-files that tdt.read_block uses. Videos, *_extracted.mat and other files are left out.
+is not in `conditions_to_exclude` (src/assemble_all_data.py), and zips the files
+that tdt.read_block uses plus any videos (.avi/.mp4). *_extracted.mat and other
+files are left out.
 Originals are never modified.
 
 Each zip contains tanks/<tank folder>/<files>, so extracting it into raw_data/
@@ -26,6 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TDT_SUFFIXES = {".tev", ".tsq", ".tbk", ".tdx", ".tin", ".tnt"}
+# Not used by the pipeline, shipped as part of the raw data. Already compressed, so stored as is.
+VIDEO_SUFFIXES = {".avi", ".mp4"}
+SHIPPED_SUFFIXES = TDT_SUFFIXES | VIDEO_SUFFIXES
 # Physiological-state labels in the file keys that the pipeline keeps
 KEEP_STATES = {"Sodium Depleted", "Sodium Replete"}
 
@@ -66,7 +70,7 @@ def main():
     for subject, group in sessions.groupby("Subject"):
         files = []
         for folder in sorted(group["Folder"].unique()):
-            tank_files = [p for p in (args.source / folder).iterdir() if p.suffix.lower() in TDT_SUFFIXES]
+            tank_files = [p for p in (args.source / folder).iterdir() if p.suffix.lower() in SHIPPED_SUFFIXES]
             if not any(p.suffix.lower() == ".tev" for p in tank_files):
                 sys.exit(f"No .tev file in {folder}")
             files += [(folder, p) for p in sorted(tank_files)]
@@ -78,7 +82,8 @@ def main():
         zip_path = args.out / name
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
             for folder, p in files:
-                zf.write(p, f"tanks/{folder}/{p.name}")
+                method = zipfile.ZIP_STORED if p.suffix.lower() in VIDEO_SUFFIXES else zipfile.ZIP_DEFLATED
+                zf.write(p, f"tanks/{folder}/{p.name}", compress_type=method, compresslevel=1)
         manifest.append({
             "archive": name,
             "subject": subject,
