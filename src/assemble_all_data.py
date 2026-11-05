@@ -12,11 +12,11 @@ This script runs the full data pipeline:
 Outputs a folder of portable files, data/assembled/ (written by
 data_io.save_assembled, read with data_io.load_assembled):
     arrays.npz      snips_* arrays
-    *.parquet       x_array, fits_df*, z_dep45
+    *.parquet       x_array, fits_df*
     *.json          metadata, params, behav_stats
 containing: x_array, snips_photo, snips_simba_zscore,
             snips_simba_shifted_baseline, snips_simba_raw,
-            snips_movement, fits_df, fits_df_da, fits_df_behav, z_dep45
+            snips_movement, fits_df, fits_df_da, fits_df_behav
 
 The intermediate caches (data/_cache_*.pickle) are private, regenerable
 dill pickles and are not part of the shared data.
@@ -51,7 +51,7 @@ from data_io import save_assembled
 from extract_behav_parameters import (
     get_ttls, read_DLC_csv, interpolate_low_likehood,
     calc_bodypart_movement,
-    get_behav_snips, smooth_array,
+    get_behav_snips,
 )
 from extract_simba import (
     read_simba_probability,
@@ -61,13 +61,7 @@ from extract_simba import (
     get_shifted_snip_means_multi_shift,
     get_time_above_simba_ci,
 )
-from model_fit_helpers import (
-    fit_logistic_transitions_by_id,
-    fit_continuous_sigmoid_transitions_by_id,
-    build_realigned_trials,
-    binarize_series_threshold,
-    quantize_series_threshold,
-)
+from model_fit_helpers import build_realigned_trials
 
 # ──────────────────────────────────────────────────────────────────────
 # CONFIGURABLE PARAMETERS — edit these to change defaults
@@ -123,41 +117,22 @@ PARAMS = {
     "auc_late_start_bin": 80,
     "auc_late_end_bin": 150,
 
-    # ── Velocity smoothing ──
-    "vel_smooth_window": 5,
-
     # ── Movement analysis parameters ──
-    "normalize_movement": False,              # Normalize to [0,1] by default
-    "movement_threshold": 3,              # Threshold for normalized movement
+    "movement_threshold": 3,              # Threshold for time_moving
     "calculate_raw_movement": True,         # Optional: also analyze raw pixels
     "movement_threshold_raw": 0.5,           # Threshold for raw pixel movement (pixels/frame)
 
     # ── Sigmoidal transition fit ──
     "transition_condition": "deplete",
     "transition_infusion": "45NaCl",
-    "logistic_maxfev": 60000,
     # Dopamine transition: trial of maximum negative derivative of the
     # selected DA summary signal.
     "da_transition_method": "max_velocity",
     "da_transition_signal_col": "auc_snips",
     "da_velocity_smoothing_window": 5,
-    # Behavioral transition mode for realignment:
-    #   - "median_balance": continuous sigmoid on simba_median_balance
-    #   - "binarized": logistic fit on thresholded simba_median_balance (middle values ignored)
-    #   - "quantized": continuous sigmoid on quantized (-1/0/+1) simba_median_balance
-    "behavior_transition_mode": "median_balance",
+    # Behavioral transition: trial of maximum negative derivative of this signal
+    # ("max_velocity", or legacy alias "velocity").
     "behavior_transition_signal_col": "simba_median_balance",
-    "behavior_transition_low_threshold": -0.7,
-    "behavior_transition_high_threshold": 0.7,
-    "behavior_transition_maxfev": 30000,
-    "behavior_transition_require_negative_k": True,
-    "behavior_transition_max_x0": 50,
-
-    # ── Behavioral transition method ──
-    # Selects how per-rat behavioral transition trials are determined:
-    #   - "sigmoid": fit a continuous sigmoid to the signal (existing default)
-    #   - "max_velocity" (or legacy alias "velocity"): use the trial of
-    #     maximum negative derivative (steepest decline)
     "behavior_transition_method": "max_velocity",
     # Smoothing window (must be odd) for the derivative when using "max_velocity".
     "behavior_velocity_smoothing_window": 5,
@@ -417,8 +392,6 @@ def assemble_behaviour(params):
                 "id": row["Subject"],
                 "condition": row["Physiological state"],
                 "infusiontype": infusion_label,
-                "movement_mean": movement_mean,
-                "movement_std": movement_std,
             }))
         except Exception as e:
             print(f"ERROR: {e}")
@@ -723,93 +696,6 @@ def equalize_datasets(
 # STEP 6: Transition fitting
 # ──────────────────────────────────────────────────────────────────────
 
-def find_behavioral_transitions(x_array, params, signal_col="simba_median_balance"):
-    """Fit per-rat behavioral transitions for deplete + 45NaCl.
-
-    Controlled by params["behavior_transition_mode"]:
-      - "median_balance": continuous sigmoid on signal_col
-      - "binarized": logistic on thresholded signal_col
-      - "quantized": continuous sigmoid on {-1,0,+1} transformed signal_col
-    """
-    mode = params.get("behavior_transition_mode", "median_balance")
-    signal_col = params.get("behavior_transition_signal_col", signal_col)
-    low_thr = float(params.get("behavior_transition_low_threshold", -0.7))
-    high_thr = float(params.get("behavior_transition_high_threshold", 0.7))
-    maxfev = int(params.get("behavior_transition_maxfev", 30000))
-    require_negative_k = bool(params.get("behavior_transition_require_negative_k", True))
-    max_x0 = params.get("behavior_transition_max_x0", 50)
-
-    print(f"  Calculating behavioral transitions using mode='{mode}' from {signal_col}")
-
-    if signal_col not in x_array.columns:
-        print(f"  Behavioral transition column '{signal_col}' not found; skipping behavior fits.")
-        return pd.DataFrame(columns=["id", "x0_orig", "success", "note"])
-
-    cond = params["transition_condition"]
-    inf = params["transition_infusion"]
-    df_dep_45 = x_array.query("condition == @cond & infusiontype == @inf").copy()
-    bin_col = f"{signal_col}_binarized"
-    quant_col = f"{signal_col}_quantized"
-
-    if mode == "median_balance":
-        fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
-            df_dep_45,
-            signal_col=signal_col,
-            maxfev=maxfev,
-            require_negative_k=require_negative_k,
-            min_x0=0,
-            max_x0=max_x0,
-        )
-    elif mode == "binarized":
-        if bin_col in df_dep_45.columns:
-            fits_df_behav, _ = fit_logistic_transitions_by_id(
-                df_dep_45,
-                signal_col=bin_col,
-                value_transform=None,
-                direction="decreasing",
-                maxfev=max(int(params.get("logistic_maxfev", 60000)), maxfev),
-                min_x0=0,
-                max_x0=max_x0,
-            )
-        else:
-            fits_df_behav, _ = fit_logistic_transitions_by_id(
-                df_dep_45,
-                signal_col=signal_col,
-                value_transform=lambda values: binarize_series_threshold(values, low=low_thr, high=high_thr),
-                direction="decreasing",
-                maxfev=max(int(params.get("logistic_maxfev", 60000)), maxfev),
-                min_x0=0,
-                max_x0=max_x0,
-            )
-    elif mode == "quantized":
-        if quant_col not in df_dep_45.columns:
-            df_dep_45 = df_dep_45.assign(
-                **{quant_col: quantize_series_threshold(df_dep_45[signal_col].to_numpy(dtype=float), low=low_thr, high=high_thr)}
-            )
-        fits_df_behav, _ = fit_continuous_sigmoid_transitions_by_id(
-            df_dep_45,
-            signal_col=quant_col,
-            maxfev=maxfev,
-            require_negative_k=require_negative_k,
-            min_x0=0,
-            max_x0=max_x0,
-        )
-    else:
-        raise ValueError(
-            f"Unknown behavior_transition_mode '{mode}'. "
-            "Expected one of: median_balance, binarized, quantized"
-        )
-
-    if not fits_df_behav.empty:
-        fits_df_behav = fits_df_behav.copy()
-        fits_df_behav["behavior_transition_mode"] = mode
-
-    print(f"  Successful behavioral fits: {len(fits_df_behav)} / {len(df_dep_45.id.unique())} rats")
-    if not fits_df_behav.empty:
-        print(f"  Behavioral transition points: {fits_df_behav.x0_orig.round(1).tolist()}")
-    return fits_df_behav
-
-
 def find_max_velocity_transitions(
     x_array,
     params,
@@ -962,41 +848,20 @@ def _drop_legacy_simba_columns(df):
     return df
 
 
-def _add_behavior_transition_columns(df, params):
-    """Add binarized/quantized behavior columns so transition modes can reuse them."""
-    signal_col = params.get("behavior_transition_signal_col", "simba_median_balance")
-    low_thr = float(params.get("behavior_transition_low_threshold", -0.7))
-    high_thr = float(params.get("behavior_transition_high_threshold", 0.7))
-
-    if signal_col not in df.columns:
-        print(f"  Could not create transition helper columns: '{signal_col}' not in x_array")
-        return df
-
-    bin_col = f"{signal_col}_binarized"
-    quant_col = f"{signal_col}_quantized"
-
-    signal = df[signal_col].to_numpy(dtype=float)
-    df[bin_col] = binarize_series_threshold(signal, low=low_thr, high=high_thr)
-    df[quant_col] = quantize_series_threshold(signal, low=low_thr, high=high_thr)
-    print(f"  Added transition helper columns: {bin_col}, {quant_col}")
-    return df
-
-
 def _normalize_behavior_transition_method(method):
     """Normalize behavior transition method names to canonical values."""
     if method is None:
-        return "sigmoid"
+        return "max_velocity"
 
     method_norm = str(method).strip().lower()
     aliases = {
         "velocity": "max_velocity",
         "max_velocity": "max_velocity",
-        "sigmoid": "sigmoid",
     }
     if method_norm not in aliases:
         raise ValueError(
             f"Unknown behavior_transition_method '{method}'. "
-            "Expected one of: sigmoid, max_velocity, velocity"
+            "Expected one of: max_velocity, velocity"
         )
     return aliases[method_norm]
 
@@ -1021,16 +886,13 @@ def _normalize_da_transition_method(method):
 
 def _validate_transition_params(params):
     """Validate transition-related parameter values with clear errors."""
-    allowed_methods = ["sigmoid", "max_velocity", "velocity"]
-    allowed_modes = ["median_balance", "binarized", "quantized"]
+    allowed_methods = ["max_velocity", "velocity"]
     allowed_da_methods = ["max_velocity", "velocity"]
 
-    method_raw = params.get("behavior_transition_method", "sigmoid")
-    mode_raw = params.get("behavior_transition_mode", "median_balance")
+    method_raw = params.get("behavior_transition_method", "max_velocity")
     da_method_raw = params.get("da_transition_method", "max_velocity")
 
     method_norm = str(method_raw).strip().lower()
-    mode_norm = str(mode_raw).strip().lower()
     da_method_norm = str(da_method_raw).strip().lower()
 
     if method_norm not in allowed_methods:
@@ -1041,16 +903,6 @@ def _validate_transition_params(params):
         raise ValueError(
             f"Invalid behavior_transition_method '{method_raw}'. "
             f"Allowed values: {allowed_methods}"
-        )
-
-    if mode_norm not in allowed_modes:
-        print(
-            "ERROR: Invalid behavior_transition_mode "
-            f"'{mode_raw}'. Allowed values: {allowed_modes}"
-        )
-        raise ValueError(
-            f"Invalid behavior_transition_mode '{mode_raw}'. "
-            f"Allowed values: {allowed_modes}"
         )
 
     if da_method_norm not in allowed_da_methods:
@@ -1113,12 +965,7 @@ def combine_and_realign(
     print("STEP 7: Combining data and realigning trials")
     print("=" * 60)
 
-    # Smooth velocity snips
-    snips_movement_smooth = smooth_array(snips_movement, window_size=params["vel_smooth_window"])
-
-    # Calculate AUCs using trapezoidal rule (true area under curve)
     s, e = params["auc_start_bin"], params["auc_end_bin"]
-    auc_movement = get_auc_by_window(snips_movement_smooth, start_bin=s, end_bin=e)
 
     # Calculate time moving (normalized)
     time_moving = get_time_moving(snips_movement, threshold=params["movement_threshold"],
@@ -1131,7 +978,6 @@ def combine_and_realign(
                                           start_bin=s, end_bin=e)
 
     x_combined = add_photometry_summary_columns(x_photo, snips_photo, params).assign(
-        auc_movement=auc_movement,
         time_moving=time_moving,
     )
     
@@ -1155,30 +1001,16 @@ def combine_and_realign(
         trial_aligned=realigned_trials_da,
     )
 
-    # Now realign the deplete+45NaCl subset (with NaN values dropped)
-    cond = params["transition_condition"]
-    inf = params["transition_infusion"]
-    z = (
-        x_combined
-        .query("condition == @cond & infusiontype == @inf")
-        .dropna(subset=['realigned_trials_da'])
-        .reset_index(drop=True)
-    )
-
     print(f"  Combined x_array: {len(x_combined)} trials")
     print(
         f"  Added realigned_trials_da column "
         f"(NaN for {(x_combined['realigned_trials_da'].isna()).sum()} trials without DA fits)"
     )
-    print(
-        f"  Added realigned_trials_behav column "
-        f"(NaN for {(x_combined['realigned_trials_behav'].isna()).sum()} trials without behavioral fits)"
-    )
+    print(f"  Added realigned_trials_behav column (NaN for {(x_combined['realigned_trials_behav'].isna()).sum()} trials without behavioral fits)")
     if time_moving_raw is not None:
         print(f"  Added time_moving_raw column (threshold={params['movement_threshold_raw']} pixels)")
-    print(f"  Realigned deplete+45NaCl subset (DA-aligned): {len(z)} trials with valid alignments")
 
-    return x_combined, z
+    return x_combined
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1277,12 +1109,6 @@ def run_pipeline(params=None):
         snips_simba_zscore=snips_simba_zscore,
     )
     
-    # Add behavioral stats columns from x_behav to x_photo (they're now aligned after equalization)
-    behav_cols = ["movement_mean", "movement_std"]
-    for col in behav_cols:
-        if col in x_behav.columns:
-            x_photo[col] = x_behav[col]
-
     if x_simba is not None:
         x_photo = _drop_legacy_simba_columns(x_photo)
         simba_cols = [
@@ -1296,9 +1122,6 @@ def run_pipeline(params=None):
             else:
                 print(f"  Warning: Simba metadata missing '{col}'. Rerun with cache_simba=False to populate it.")
 
-        # Always make thresholded behavior transition columns available on x_array.
-        x_photo = _add_behavior_transition_columns(x_photo, params)
-
     x_combined = _drop_legacy_simba_columns(x_photo)
 
     # Step 6: Transition fitting
@@ -1309,13 +1132,6 @@ def run_pipeline(params=None):
         cached = _load_cache(transitions_cache_path, "transitions")
     else:
         cached = None
-    cache_mode = None
-    if cached is not None:
-        cache_mode = cached.get("behavior_transition_mode")
-        if cache_mode is None and "_cached_params" in cached:
-            cache_mode = cached["_cached_params"].get("behavior_transition_mode")
-
-    # Cache is valid only when both the sigmoid mode AND transition method match.
     cached_method = None
     if cached is not None:
         cached_method = cached.get("behavior_transition_method")
@@ -1323,7 +1139,7 @@ def run_pipeline(params=None):
             cached_method = cached["_cached_params"].get("behavior_transition_method")
 
     current_method = _normalize_behavior_transition_method(
-        params.get("behavior_transition_method", "sigmoid")
+        params.get("behavior_transition_method", "max_velocity")
     )
     if cached_method is not None:
         cached_method = _normalize_behavior_transition_method(cached_method)
@@ -1348,7 +1164,6 @@ def run_pipeline(params=None):
         cached_da_method = _normalize_da_transition_method(cached_da_method)
     current_da_signal_col = params.get("da_transition_signal_col", "auc_snips")
     current_da_window = int(params.get("da_velocity_smoothing_window", 5))
-    current_mode = params.get("behavior_transition_mode", "median_balance")
 
     x_combined = add_photometry_summary_columns(x_combined, snips_photo, params)
 
@@ -1357,7 +1172,6 @@ def run_pipeline(params=None):
         and "fits_df" in cached
         and "fits_df_behav" in cached
         and "fits_df_da_velocity" in cached
-        and cache_mode == current_mode
         and cached_method == current_method
         and cached_da_method == current_da_method
         and cached_da_signal_col == current_da_signal_col
@@ -1371,23 +1185,20 @@ def run_pipeline(params=None):
         fits_df_behav = cached["fits_df_behav"]
         print(
             f"  Transitions from cache: {len(fits_df_da)} DA fits, {len(fits_df_behav)} behavioral fits "
-            f"(behavior method={current_method}, behavior mode={cache_mode}, da method={current_da_method})"
+            f"(behavior method={current_method}, da method={current_da_method})"
         )
     else:
         if cached is not None:
             print(
-                f"  Transition cache mismatch (cached behavior={cached_method}/{cache_mode}, "
+                f"  Transition cache mismatch (cached behavior={cached_method}, "
                 f"cached DA={cached_da_method}/{cached_da_signal_col}/{cached_da_window}; "
-                f"current behavior={current_method}/{current_mode}, "
+                f"current behavior={current_method}, "
                 f"current DA={current_da_method}/{current_da_signal_col}/{current_da_window}); recomputing transitions."
             )
         print("  Calculating DA and behavioral transitions")
         fits_df_da_velocity = find_da_velocity_transitions(x_combined, params)
         fits_df_da = fits_df_da_velocity
-        if current_method == "max_velocity":
-            fits_df_behav = find_velocity_transitions(x_combined, params)
-        else:
-            fits_df_behav = find_behavioral_transitions(x_combined, params)
+        fits_df_behav = find_velocity_transitions(x_combined, params)
         fits_df = fits_df_da
         print(f"  Calculated {len(fits_df_da)} DA transition fits and {len(fits_df_behav)} behavioral transition fits")
         _save_cache(
@@ -1399,13 +1210,8 @@ def run_pipeline(params=None):
                 "da_transition_method": current_da_method,
                 "da_transition_signal_col": current_da_signal_col,
                 "da_velocity_smoothing_window": current_da_window,
-                "behavior_transition_mode": current_mode,
                 "behavior_transition_method": current_method,
                 "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
-                "behavior_transition_thresholds": (
-                    params.get("behavior_transition_low_threshold", -0.7),
-                    params.get("behavior_transition_high_threshold", 0.7),
-                ),
             },
             transitions_cache_path,
             "transitions",
@@ -1416,7 +1222,7 @@ def run_pipeline(params=None):
         fits_df = fits_df_da
 
     # Step 7: Combine and realign
-    x_combined, z_dep45 = combine_and_realign(
+    x_combined = combine_and_realign(
         x_combined,
         snips_photo,
         snips_movement,
@@ -1443,18 +1249,13 @@ def run_pipeline(params=None):
         "da_transition_method": current_da_method,
         "da_transition_signal_col": current_da_signal_col,
         "da_velocity_smoothing_window": current_da_window,
-        "behavior_transition_mode": params.get("behavior_transition_mode", "median_balance"),
-        "behavior_transition_method": current_method,
         "behavior_velocity_smoothing_window": params.get("behavior_velocity_smoothing_window", 3),
+        "behavior_transition_method": current_method,
         "behavior_transition_signal_col": params.get("behavior_transition_signal_col", "simba_median_balance"),
-        "behavior_transition_low_threshold": params.get("behavior_transition_low_threshold", -0.7),
-        "behavior_transition_high_threshold": params.get("behavior_transition_high_threshold", 0.7),
         "photo_smoothed": False,  # Photometry is NOT smoothed during assembly
         "photo_zscored": True,  # Photometry is z-scored by trompy during processing
         "behav_metrics": "movement",
-        # Movement analysis parameters
-        "normalize_movement": params.get("normalize_movement", True),
-        "movement_threshold": params.get("movement_threshold", 0.02),
+        "movement_threshold": params["movement_threshold"],
         "auc_start_bin": params.get("auc_start_bin", 50),
         "auc_end_bin": params.get("auc_end_bin", 150),
         "auc_early_start_bin": params.get("auc_early_start_bin", 50),
@@ -1479,7 +1280,6 @@ def run_pipeline(params=None):
         "fits_df_da": fits_df_da,
         "fits_df_da_velocity": fits_df_da_velocity,
         "fits_df_behav": fits_df_behav,
-        "z_dep45": z_dep45,
         "metadata": metadata,
         "params": params,
         "behav_stats": behav_stats,  # Mean/std of movement per file, excluding first/last 1800 frames
@@ -1501,14 +1301,12 @@ def run_pipeline(params=None):
     print(f"  snips_simba_shifted_baseline shape: {snips_simba_shifted_baseline.shape}")
     print(f"  snips_simba_zscore shape:   {snips_simba_zscore.shape}")
     print(f"  snips_movement shape:   {snips_movement.shape}")
-    print(f"  z_dep45 shape:     {z_dep45.shape}")
     print(f"  fits_df shape:     {fits_df.shape}")
     print(f"  fits_df_da shape:  {fits_df_da.shape}")
     print(f"  fits_df_da_velocity shape:  {fits_df_da_velocity.shape}")
     print(f"  fits_df_behav shape: {fits_df_behav.shape}")
     print(f"  dopamine transition method: {metadata['da_transition_method']}")
     print(f"  behavioral transition method: {metadata['behavior_transition_method']}")
-    print(f"  behavioral transition mode: {metadata['behavior_transition_mode']}")
     print(f"\nData processing metadata:")
     print(f"  Behaviour metrics:    {metadata['behav_metrics']}")
     print(f"  Behaviour smoothed:  {metadata['behav_smoothed']} (method: {metadata['behav_smooth_method']}, window: {metadata['behav_smooth_window']})")
