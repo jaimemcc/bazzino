@@ -71,6 +71,9 @@ def main():
         files = []
         for folder in sorted(group["Folder"].unique()):
             tank_files = [p for p in (args.source / folder).iterdir() if p.suffix.lower() in SHIPPED_SUFFIXES]
+            # Skip an .mp4 that duplicates an .avi of the same name
+            avi_stems = {p.stem for p in tank_files if p.suffix.lower() == ".avi"}
+            tank_files = [p for p in tank_files if not (p.suffix.lower() == ".mp4" and p.stem in avi_stems)]
             if not any(p.suffix.lower() == ".tev" for p in tank_files):
                 sys.exit(f"No .tev file in {folder}")
             files += [(folder, p) for p in sorted(tank_files)]
