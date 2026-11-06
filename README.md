@@ -1,5 +1,9 @@
 # bazzino-paper
 
+This is the original development repository for the project. The publication
+repository, with the code and data prepared to reproduce the paper's figures,
+is [mccutcheonlab/bazzino-paper](https://github.com/mccutcheonlab/bazzino-paper).
+
 Code and data for the figures in:
 
 > Bazzino P, Russchen DCR, Keinath AT*, Roitman MF*, McCutcheon JE*. (2026). *Rapidly decreasing phasic dopamine responses precede a valence switch during satiation of sodium appetite*. bioRxiv (preprint; update on acceptance). https://doi.org/10.64898/2026.07.16.738888

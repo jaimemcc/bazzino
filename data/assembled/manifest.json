@@ -1,0 +1,50 @@
+{
+ "x_array": {
+  "kind": "dataframe",
+  "file": "x_array.parquet"
+ },
+ "snips_photo": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_simba_raw": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_simba_shifted_baseline": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_simba_zscore": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_simba_baseline": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_simba": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "snips_movement": {
+  "kind": "array",
+  "file": "arrays.npz"
+ },
+ "metadata": {
+  "kind": "dict",
+  "file": "metadata.json"
+ },
+ "params": {
+  "kind": "dict",
+  "file": "params.json"
+ },
+ "behav_stats": {
+  "kind": "dict",
+  "file": "behav_stats.json"
+ },
+ "snips_movement_raw": {
+  "kind": "array",
+  "file": "arrays.npz"
+ }
+}

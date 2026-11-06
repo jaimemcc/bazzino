@@ -1,0 +1,322 @@
+{
+ "PB23_PB23-220608-131619": {
+  "subject": "PB23",
+  "folder": "PB23-220608-131619",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 4.594260288924802,
+  "movement_std": 5.587706642793809
+ },
+ "PB24_PB24-220608-122638": {
+  "subject": "PB24",
+  "folder": "PB24-220608-122638",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 9.231698004376574,
+  "movement_std": 24.085029941072087
+ },
+ "PB33_PB33-220620-115414": {
+  "subject": "PB33",
+  "folder": "PB33-220620-115414",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.863962925443782,
+  "movement_std": 7.441344929414727
+ },
+ "PB39_PB39-220629-105034": {
+  "subject": "PB39",
+  "folder": "PB39-220629-105034",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 2.241876444868187,
+  "movement_std": 2.353128289359811
+ },
+ "PB391_PB391-220829-111452": {
+  "subject": "PB391",
+  "folder": "PB391-220829-111452",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.460471800609579,
+  "movement_std": 7.308564439151808
+ },
+ "PB44_PB44-220829-121005": {
+  "subject": "PB44",
+  "folder": "PB44-220829-121005",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.3256287613209072,
+  "movement_std": 9.081833322363527
+ },
+ "PB61_PB61-221024-110730": {
+  "subject": "PB61",
+  "folder": "PB61-221024-110730",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 2.8155515110194678,
+  "movement_std": 4.218301891100624
+ },
+ "PB62_PB62-221024-120029": {
+  "subject": "PB62",
+  "folder": "PB62-221024-120029",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.3951708155286116,
+  "movement_std": 4.652519683323128
+ },
+ "PB64_PB64-221024-143444": {
+  "subject": "PB64",
+  "folder": "PB64-221024-143444",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 2.7731831459024407,
+  "movement_std": 4.762668140012053
+ },
+ "PB70_PB70-221024-134346": {
+  "subject": "PB70",
+  "folder": "PB70-221024-134346",
+  "treatment": 1,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.331300096869498,
+  "movement_std": 5.210781735034781
+ },
+ "PB23_PB23-220601-142444": {
+  "subject": "PB23",
+  "folder": "PB23-220601-142444",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.2294982192583825,
+  "movement_std": 6.767085410897805
+ },
+ "PB24_PB24-220601-133332": {
+  "subject": "PB24",
+  "folder": "PB24-220601-133332",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.062287662283818,
+  "movement_std": 5.650824042987768
+ },
+ "PB33_PB33-220614-133339": {
+  "subject": "PB33",
+  "folder": "PB33-220614-133339",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.360046568158104,
+  "movement_std": 3.5894614246440866
+ },
+ "PB39_PB39-220627-104923": {
+  "subject": "PB39",
+  "folder": "PB39-220627-104923",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 2.6994932807379386,
+  "movement_std": 6.008257475150824
+ },
+ "PB391_PB391-220826-104731": {
+  "subject": "PB391",
+  "folder": "PB391-220826-104731",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.0178008523359097,
+  "movement_std": 3.4294111948504904
+ },
+ "PB44_PB44-220826-113745": {
+  "subject": "PB44",
+  "folder": "PB44-220826-113745",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 5.670452511204977,
+  "movement_std": 8.328047447342843
+ },
+ "PB61_PB61-221022-094209": {
+  "subject": "PB61",
+  "folder": "PB61-221022-094209",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.979362175063715,
+  "movement_std": 8.084313233776141
+ },
+ "PB62_PB62-221022-103215": {
+  "subject": "PB62",
+  "folder": "PB62-221022-103215",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.461946603857242,
+  "movement_std": 5.6746823560179545
+ },
+ "PB64_PB64-221022-112221": {
+  "subject": "PB64",
+  "folder": "PB64-221022-112221",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.706293930951745,
+  "movement_std": 7.276763750098354
+ },
+ "PB70_PB70-221022-121226": {
+  "subject": "PB70",
+  "folder": "PB70-221022-121226",
+  "treatment": 1,
+  "condition": "Sodium Replete",
+  "movement_mean": 6.754344356249246,
+  "movement_std": 17.395835856730763
+ },
+ "PB26_PB26-220608-113244": {
+  "subject": "PB26",
+  "folder": "PB26-220608-113244",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 4.684258335704005,
+  "movement_std": 8.25514963412941
+ },
+ "PB27_PB27-220608-104154": {
+  "subject": "PB27",
+  "folder": "PB27-220608-104154",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 7.368697492221731,
+  "movement_std": 14.233735667890812
+ },
+ "PB30_PB30-220620-100529": {
+  "subject": "PB30",
+  "folder": "PB30-220620-100529",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 4.358421828525634,
+  "movement_std": 9.55355171913812
+ },
+ "PB31_PB31-220620-105832": {
+  "subject": "PB31",
+  "folder": "PB31-220620-105832",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.4791935478982423,
+  "movement_std": 4.736708065626164
+ },
+ "PB46_PB46-220926-133715": {
+  "subject": "PB46",
+  "folder": "PB46-220926-133715",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.649719861812553,
+  "movement_std": 6.93287602360563
+ },
+ "PB48_PB48-220926-121542": {
+  "subject": "PB48",
+  "folder": "PB48-220926-121542",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.581984795851321,
+  "movement_std": 7.078894442224082
+ },
+ "PB71_PB71-221123-113609": {
+  "subject": "PB71",
+  "folder": "PB71-221123-113609",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 1.6003234628306144,
+  "movement_std": 1.698431814266132
+ },
+ "PB72_PB72-221123-122441": {
+  "subject": "PB72",
+  "folder": "PB72-221123-122441",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.607996690402092,
+  "movement_std": 4.190699597423664
+ },
+ "PB73_PB73-221123-131413": {
+  "subject": "PB73",
+  "folder": "PB73-221123-131413",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 2.836949506392174,
+  "movement_std": 4.143427790170185
+ },
+ "PB75_PB75-221123-140659": {
+  "subject": "PB75",
+  "folder": "PB75-221123-140659",
+  "treatment": 45,
+  "condition": "Sodium Depleted",
+  "movement_mean": 3.3542453930517087,
+  "movement_std": 3.9141533513226685
+ },
+ "PB26_PB26-220601-113859": {
+  "subject": "PB26",
+  "folder": "PB26-220601-113859",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 5.689434920349032,
+  "movement_std": 14.91939746282373
+ },
+ "PB27_PB27-220601-104408": {
+  "subject": "PB27",
+  "folder": "PB27-220601-104408",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 5.127228955919031,
+  "movement_std": 8.58899118332377
+ },
+ "PB30_PB30-220614-104707": {
+  "subject": "PB30",
+  "folder": "PB30-220614-104707",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.316480116177074,
+  "movement_std": 7.301293203005516
+ },
+ "PB31_PB31-220614-113720": {
+  "subject": "PB31",
+  "folder": "PB31-220614-113720",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.879314711277818,
+  "movement_std": 5.311522761666737
+ },
+ "PB46_PB46-220922-132610": {
+  "subject": "PB46",
+  "folder": "PB46-220922-132610",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.8433087462156665,
+  "movement_std": 4.712757116813291
+ },
+ "PB48_PB48-220922-123633": {
+  "subject": "PB48",
+  "folder": "PB48-220922-123633",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.1674387946325657,
+  "movement_std": 3.8551469333524637
+ },
+ "PB71_PB71-221121-112814": {
+  "subject": "PB71",
+  "folder": "PB71-221121-112814",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.0424038683842545,
+  "movement_std": 3.5612419304095817
+ },
+ "PB72_PB72-221121-121640": {
+  "subject": "PB72",
+  "folder": "PB72-221121-121640",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 4.511251434468017,
+  "movement_std": 5.456561894674629
+ },
+ "PB73_PB73-221121-130541": {
+  "subject": "PB73",
+  "folder": "PB73-221121-130541",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 3.3275250134434082,
+  "movement_std": 3.7293563337705513
+ },
+ "PB75_PB75-221121-144718": {
+  "subject": "PB75",
+  "folder": "PB75-221121-144718",
+  "treatment": 45,
+  "condition": "Sodium Replete",
+  "movement_mean": 2.8703895503165477,
+  "movement_std": 3.8192259986701815
+ }
+}
