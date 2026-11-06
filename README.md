@@ -1,4 +1,9 @@
 # bazzino
+
+This is the original development repository for the project. The publication
+repository, with the code and data prepared to reproduce the paper's figures,
+is [mccutcheonlab/bazzino-paper](https://github.com/mccutcheonlab/bazzino-paper).
+
 Analysis of data in sodium appetite experiment by Bazzino et al. Preprint available at:
 https://www.biorxiv.org/content/10.64898/2026.07.16.738888v1
 
